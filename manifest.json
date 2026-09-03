@@ -1,0 +1,11 @@
+{
+  "display_name": "春序档案",
+  "loading_order": 120,
+  "js": "index.js",
+  "css": "style.css",
+  "author": "凡人歌 × 奶龙",
+  "version": "0.5.2",
+  "minimum_client_version": "1.14.0",
+  "generate_interceptor": "springStoryArchiveSemanticRecallInterceptor",
+  "auto_update": false
+}

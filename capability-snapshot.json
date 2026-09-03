@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-02T00:00:00+08:00",
+  "versions": {
+    "sillytavern": "1.14.0"
+  },
+  "symbols": [
+    "SillyTavern.getContext",
+    "context.extensionSettings",
+    "context.saveSettingsDebounced",
+    "context.chat",
+    "context.getCurrentChatId",
+    "context.eventSource",
+    "context.generateRaw",
+    "context.generate",
+    "context.setExtensionPrompt"
+  ]
+}

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>春序档案 · 视觉预览</title>
+  <link rel="stylesheet" href="style.css?v=0.5.2">
+  <style>
+    html, body { min-height: 100%; margin: 0; background: linear-gradient(145deg, #253a32, #557265); }
+    .preview-note { position: fixed; left: 18px; bottom: 18px; z-index: 1; color: rgba(255,255,255,.65); font: 12px/1.5 system-ui; }
+  </style>
+</head>
+<body>
+  <p class="preview-note">春序档案 · 静态视觉预览</p>
+  <script type="module">
+    import { createArchiveShell, focusLatestFloor, renderModelOptions, renderNpcs, renderPlayerProfile, renderRecallState, renderSnapshot, resetPreferenceTest, setOpen, setRetestConfirmOpen, switchTab, syncSettings } from './ui/view.js?v=0.5.2';
+    const root = createArchiveShell();
+    root.addEventListener('click', (event) => {
+      const tab = event.target.closest('[data-tab]');
+      if (tab) {
+        switchTab(root, tab.dataset.tab);
+        if (tab.dataset.tab === 'summary') requestAnimationFrame(() => focusLatestFloor(root, { behavior: 'auto' }));
+      }
+      const retry = event.target.closest('[data-action="regenerate-floor"]');
+      if (retry) {
+        const record = previewSnapshot.summaries.find((item) => item.floorIndex === Number(retry.dataset.floor));
+        if (record) {
+          record.status = 'processing';
+          record.error = '';
+          renderPreview();
+        }
+      }
+      const action = event.target.closest('[data-action]')?.dataset.action;
+      if (action === 'open-preference-test') {
+        if (root.dataset.hasPreferenceProfile === 'true') setRetestConfirmOpen(root, true);
+        else { resetPreferenceTest(root); switchTab(root, 'preference-test'); }
+      }
+      if (action === 'close-preference-test') switchTab(root, 'advance');
+      if (action === 'cancel-retest') setRetestConfirmOpen(root, false);
+      if (action === 'confirm-retest') {
+        setRetestConfirmOpen(root, false);
+        resetPreferenceTest(root);
+        switchTab(root, 'preference-test');
+      }
+    });
+    setOpen(root, true);
+    const initialTab = new URLSearchParams(location.search).get('tab');
+    if (['summary', 'options', 'advance', 'npc', 'settings', 'preference-test'].includes(initialTab)) switchTab(root, initialTab);
+    const previewSnapshot = {
+      totalFloors: 7,
+      rollup: {
+        text: '暮春傍晚，玩家在临水旧宅与沈砚重逢。两人围绕失踪的家书互相试探，确认信中提到的白茶花并非装饰，而是旧年约定的暗号。沈砚暂未说明离城三年的真相，只答应在雨停前带玩家去西廊查看被封存的房间。',
+        readyFloors: 5,
+        tokenEstimate: 2310,
+      },
+      checkpoints: [],
+      summaries: [
+        {
+          floorIndex: 6,
+          status: 'processing',
+          isUser: false,
+          speakerName: '沈砚',
+          userText: '',
+          summary: '',
+          characters: [], relationships: [], clues: [], timeline: [], error: '',
+        },
+        {
+          floorIndex: 5,
+          status: 'failed',
+          isUser: true,
+          speakerName: '玩家',
+          userText: '先别替我做决定。我会留下，但我要自己去确认西廊的门。',
+          summary: '',
+          characters: [], relationships: [], clues: [], timeline: [],
+          error: '上次请求中断，可以重新生成。',
+        },
+        {
+          floorIndex: 4,
+          status: 'ready',
+          isUser: false,
+          speakerName: '沈砚',
+          userText: '',
+          summary: '沈砚将沾雨的信封放在灯下，指出封蜡里压着一片白茶花瓣。他没有解释来源，只让玩家在子夜前不要离开旧宅。',
+          characters: ['沈砚：态度从回避转为有限合作'],
+          relationships: ['沈砚与玩家：暂时合作，信任仍未建立'],
+          clues: ['白茶花是旧年暗号', '西廊房间仍被封存'],
+          timeline: ['暮春傍晚 · 临水旧宅书房'],
+          error: '',
+        },
+        {
+          floorIndex: 3,
+          status: 'ready',
+          isUser: true,
+          speakerName: '玩家',
+          userText: '我认得这个旧印。沈砚，你为什么会拿着我家失踪多年的信？',
+          summary: '玩家认出信封上的墨迹来自家中旧印，并明确追问沈砚为何持有失踪多年的家书。',
+          characters: ['玩家：开始主动追查家书来源'],
+          relationships: ['玩家对沈砚：明确质疑'],
+          clues: ['门响发生在无人居住的西廊'],
+          timeline: ['暮春傍晚 · 雨初落'],
+          error: '',
+        },
+        {
+          floorIndex: 2,
+          status: 'ready',
+          isUser: false,
+          speakerName: '沈砚',
+          userText: '',
+          summary: '窗外开始落雨，西廊传来一次短促的门响。沈砚停下解释，将信封推到玩家面前。',
+          characters: ['沈砚：回避解释家书来源'],
+          relationships: [],
+          clues: ['西廊在无人靠近时传出门响'],
+          timeline: ['暮春傍晚 · 雨初落'],
+          error: '',
+        },
+        {
+          floorIndex: 1,
+          status: 'ready',
+          isUser: true,
+          speakerName: '玩家',
+          userText: '我来找三年前失踪的家书，先从书房查起。',
+          summary: '玩家说明自己正在追查三年前失踪的家书，并决定先检查旧宅书房。',
+          characters: ['玩家：明确当前调查目标'],
+          relationships: [],
+          clues: ['家书在三年前失踪'],
+          timeline: ['暮春傍晚 · 临水旧宅书房'],
+          error: '',
+        },
+        {
+          floorIndex: 0,
+          status: 'ready',
+          isUser: false,
+          speakerName: '沈砚',
+          userText: '',
+          summary: '沈砚在暮春傍晚打开临水旧宅，将玩家带进书房，桌上放着一封尚未拆开的旧信。',
+          characters: ['沈砚：三年后首次与玩家见面'],
+          relationships: ['沈砚与玩家：久别重逢，彼此防备'],
+          clues: ['桌上的未拆旧信'],
+          timeline: ['暮春傍晚 · 临水旧宅书房 · 两人重逢'],
+          error: '',
+        }
+      ]
+    };
+    function renderPreview() {
+      renderSnapshot(root, {
+        ...previewSnapshot,
+        summaries: [...previewSnapshot.summaries].sort((left, right) => left.floorIndex - right.floorIndex),
+      });
+      if (!initialTab || initialTab === 'summary') requestAnimationFrame(() => focusLatestFloor(root, { behavior: 'auto' }));
+    }
+    renderPreview();
+    syncSettings(root, {
+      autoSummarize: true,
+      summarySource: 'current',
+      rollupTokenLimit: 6000,
+      expandedFloorCount: 5,
+      extraEndpoint: '',
+      extraModel: '',
+      optionMode: 'guided',
+      optionCount: 6,
+      optionSource: 'current',
+      preferenceNotes: '',
+      preferenceQuizAnswers: {},
+      storyExperiencePreferences: [],
+      preferenceSource: 'current',
+      autoAdvanceEnabled: false,
+      advanceSource: 'extra',
+      advanceRounds: 1,
+      npcBrief: '',
+      npcSource: 'current',
+      autoNpcEnabled: false,
+      semanticRecallEnabled: true,
+      recallEmbeddingModel: 'example-embedding-model',
+      recallTopK: 4,
+      recallThreshold: 0.3,
+      recallDepth: 4,
+    });
+    renderPlayerProfile(root, {
+      summary: '玩家重视选择权和时间线连续性，偏好先调查再行动，也希望人物拥有自己的立场。',
+      quizScores: { interaction: 58, relationship: 76, structure: 92, tension: 55, novelty: 71 },
+      selectedExperiences: ['relationship', 'mystery', 'lore'],
+      personalityTendencies: ['观察后再行动', '愿意理解人物动机，但不接受替玩家作决定'],
+      storyNeeds: ['可验证的线索', '慢热且有来有往的人物关系'],
+      preferredDevelopments: ['调查与关系同步推进'],
+      avoidPatterns: ['无铺垫跳时', '强制玩家表态'],
+      directorRules: ['先提供事实与选择空间，再推动事件'],
+    });
+    renderNpcs(root, [{
+      id: 'preview-npc-1',
+      name: '林素',
+      age: '34 岁',
+      lifeStage: '重新建立职业信誉',
+      occupation: '旧宅档案保管人',
+      plotFunction: '旧宅档案保管人',
+      currentGoal: '保住被篡改前的原始记录',
+      objectiveFacts: ['独自管理旧宅档案室', '目前持有一册被雨水浸过的原始登记簿'],
+      personality: '表面温和克制，遇到档案真伪问题时异常强硬。',
+      biography: ['二十三岁时，她采信一份无法复核的口头证词，间接使一位无辜抄写员被逐。家族把责任推给她，她也因此失去原本的继承位置。', '离开家族后，她在地方档案馆从誊抄员重新做起，十年间学会用来源、时间与保管链确认每一份记录。'],
+      contradictions: ['希望别人相信她的判断，却很难再相信任何未经验证的人证', '待人柔和，但一旦证据链受到威胁便近乎不留情面'],
+      personalityFormation: ['错误证词造成的真实伤害，使她把可追溯性视为保护无辜者的底线。'],
+      independentWill: ['不会交出唯一原件', '拒绝伪造证词'],
+      relationships: ['知道沈砚离城前来过档案室'],
+      growthState: ['正在决定是否重新向家族公开当年的责任链'],
+      playerMemory: ['第 6 楼：玩家当时拒绝别人替自己做决定', '第 6 楼：玩家决定亲自查看西廊'],
+      generatedAutomatically: true,
+    }]);
+    renderModelOptions(root, ['example-chat-model', 'example-fast-model'], '已读取 2 个模型，可直接选择或继续手动输入。');
+    renderRecallState(root, { indexedCount: 42, recalledFloors: [7, 18, 31] });
+  </script>
+</body>
+</html>

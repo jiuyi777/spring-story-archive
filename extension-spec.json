@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "spring-story-archive",
+  "displayName": "春序档案",
+  "author": "凡人歌 × 奶龙",
+  "version": "0.5.2",
+  "minimumClientVersion": "1.14.0",
+  "loadingOrder": 120,
+  "withCss": true,
+  "autoUpdate": false,
+  "requirements": [
+    {
+      "id": "host-context",
+      "owner": "sillytavern",
+      "symbol": "SillyTavern.getContext",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "raw-generation",
+      "owner": "sillytavern",
+      "symbol": "context.generateRaw",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "normal-generation",
+      "owner": "sillytavern",
+      "symbol": "context.generate",
+      "required": false,
+      "fallback": "自主推进保持关闭，摘要、剧情选项与 NPC 生成仍可使用。"
+    },
+    {
+      "id": "prompt-injection",
+      "owner": "sillytavern",
+      "symbol": "context.setExtensionPrompt",
+      "required": false,
+      "fallback": "语义回忆保持关闭，楼层摘要和其他功能仍可使用。"
+    }
+  ]
+}

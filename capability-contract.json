@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "minimum": {
+    "sillytavern": "1.14.0",
+    "tavernHelper": null
+  },
+  "requirements": [
+    {
+      "id": "host-context",
+      "owner": "sillytavern",
+      "symbol": "SillyTavern.getContext",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "extension-settings",
+      "owner": "sillytavern",
+      "symbol": "context.extensionSettings",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "settings-save",
+      "owner": "sillytavern",
+      "symbol": "context.saveSettingsDebounced",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "chat-read",
+      "owner": "sillytavern",
+      "symbol": "context.chat",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "chat-identity",
+      "owner": "sillytavern",
+      "symbol": "context.getCurrentChatId",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "host-events",
+      "owner": "sillytavern",
+      "symbol": "context.eventSource",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "raw-generation",
+      "owner": "sillytavern",
+      "symbol": "context.generateRaw",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "normal-generation",
+      "owner": "sillytavern",
+      "symbol": "context.generate",
+      "required": false,
+      "fallback": "自主推进保持关闭，楼层摘要、剧情选项与 NPC 生成仍可使用。"
+    },
+    {
+      "id": "prompt-injection",
+      "owner": "sillytavern",
+      "symbol": "context.setExtensionPrompt",
+      "required": false,
+      "fallback": "语义回忆保持关闭，楼层摘要和其他功能仍可使用。"
+    }
+  ]
+}
