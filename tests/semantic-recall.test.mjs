@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildRecallDocument,
   buildRecallQuery,
+  buildRecallSummaryQuery,
   callOpenAiCompatibleEmbeddings,
   cosineSimilarity,
   embeddingsEndpointForChatEndpoint,
@@ -46,6 +47,16 @@ test('recall query uses no more than the latest five raw floors', () => {
   const query = buildRecallQuery(chat, 8, 5);
   assert.doesNotMatch(query, /RAW_[1-4](?:\D|$)/);
   for (let floor = 5; floor <= 9; floor += 1) assert.match(query, new RegExp(`RAW_${floor}`));
+});
+
+test('zero raw-floor mode builds the recall query from summaries only', () => {
+  const query = buildRecallQuery([{ mes: 'PRIVATE_RAW' }], 0, 0);
+  assert.equal(query, '');
+  const summaryQuery = buildRecallSummaryQuery([
+    { floorIndex: 0, status: 'ready', summary: '允许发送的摘要', timeline: [], characters: [], relationships: [], clues: [] },
+  ], 0);
+  assert.match(summaryQuery, /允许发送的摘要/);
+  assert.doesNotMatch(summaryQuery, /PRIVATE_RAW/);
 });
 
 test('semantic ranking excludes the latest five floors and adds no player weighting', () => {

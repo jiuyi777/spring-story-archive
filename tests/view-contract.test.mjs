@@ -44,6 +44,14 @@ test('summary controls use normal document flow and the mobile backfill action s
   assert.match(source, /\[data-action="backfill"\][\s\S]*?white-space:\s*nowrap/);
 });
 
+test('summary page exposes a zero-history remote floor mode', async () => {
+  const source = await readFile(new URL('../ui/view.js', import.meta.url), 'utf8');
+  assert.match(source, /data-setting="remoteRawFloorLimit"/);
+  assert.match(source, /<option value="0">不发送历史原文<\/option>/);
+  assert.match(source, /单楼摘要仅发送当前一楼/);
+  assert.match(source, /约 6500 token 的硬上限/);
+});
+
 test('player preference profile uses one global storage key with legacy chat migration', async () => {
   const source = await readFile(new URL('../index.js', import.meta.url), 'utf8');
   assert.match(source, /PLAYER_PROFILE_KEY = `\$\{MODULE_ID\}::player-preference`/);

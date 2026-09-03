@@ -238,7 +238,13 @@ export class SummaryEngine {
 
     try {
       const rollup = await this.storage.getRollup(chatKey);
-      const payload = buildPrivacyPayload({ chat: context.chat, targetFloorIndex: floorIndex, rollingSummary: rollup?.text ?? '' });
+      const payload = buildPrivacyPayload({
+        chat: context.chat,
+        targetFloorIndex: floorIndex,
+        rollingSummary: rollup?.text ?? '',
+        rawFloorLimit: settings.remoteRawFloorLimit,
+        includeTargetFloor: true,
+      });
       const result = await requestFloorSummary(this.makeProvider(settings.summarySource), payload);
       const latest = this.getContext().chat?.[floorIndex];
       if (!latest || this.chatKey !== chatKey) return;

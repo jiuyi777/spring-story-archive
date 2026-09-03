@@ -44,6 +44,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   autoSummarize: true,
   summarySource: 'current',
   rollupTokenLimit: 6000,
+  remoteRawFloorLimit: 0,
   expandedFloorCount: 5,
   extraEndpoint: '',
   extraModel: '',
@@ -120,6 +121,9 @@ function getSettings() {
     : [];
   if (merged.optionMode === 'immersion') merged.optionMode = 'guided';
   if (merged.optionMode === 'novel') merged.optionMode = 'scene';
+  merged.remoteRawFloorLimit = [0, 1, 3, 5].includes(Number(merged.remoteRawFloorLimit))
+    ? Number(merged.remoteRawFloorLimit)
+    : 0;
   delete merged.npcFunction;
   context.extensionSettings[MODULE_ID] = merged;
   return merged;
@@ -254,6 +258,7 @@ async function recallForCurrentContext({ force = false } = {}) {
     targetFloorIndex,
     topK: settings.recallTopK,
     threshold: settings.recallThreshold,
+    recentRawFloorLimit: settings.remoteRawFloorLimit,
     force,
   });
   recallState = {
@@ -408,6 +413,7 @@ async function runAutoNpcCheck() {
       chat: latestContext.chat,
       targetFloorIndex,
       rollingSummary: rollup?.text ?? '',
+      rawFloorLimit: settings.remoteRawFloorLimit,
     }));
     const provider = createProvider({
       source: settings.npcSource,
@@ -497,6 +503,7 @@ async function runAutoAdvance() {
       chat: context.chat,
       targetFloorIndex,
       rollingSummary: rollup?.text ?? '',
+      rawFloorLimit: settings.remoteRawFloorLimit,
     }));
     const provider = createProvider({
       source: settings.advanceSource,
@@ -546,6 +553,7 @@ async function generateOptions() {
     chat: context.chat,
     targetFloorIndex: context.chat.length - 1,
     rollingSummary: rollup?.text ?? '',
+    rawFloorLimit: settings.remoteRawFloorLimit,
   }));
   const provider = createProvider({
     source: settings.optionSource,
@@ -579,6 +587,7 @@ async function analyzePreferences({ skipQuiz = false } = {}) {
     chat: context.chat,
     targetFloorIndex: context.chat.length - 1,
     rollingSummary: rollup?.text ?? '',
+    rawFloorLimit: settings.remoteRawFloorLimit,
   }));
   const provider = createProvider({
     source: settings.preferenceSource,
@@ -629,6 +638,7 @@ async function generateNpc() {
     chat: context.chat,
     targetFloorIndex: context.chat.length - 1,
     rollingSummary: rollup?.text ?? '',
+    rawFloorLimit: settings.remoteRawFloorLimit,
   }));
   const provider = createProvider({
     source: settings.npcSource,
@@ -789,7 +799,7 @@ async function handleSettingChange(input) {
   const settings = getSettings();
   settings[key] = input.type === 'checkbox'
     ? input.checked
-    : ['optionCount', 'rollupTokenLimit', 'advanceRounds', 'expandedFloorCount', 'recallTopK', 'recallThreshold', 'recallDepth'].includes(key)
+    : ['optionCount', 'rollupTokenLimit', 'remoteRawFloorLimit', 'advanceRounds', 'expandedFloorCount', 'recallTopK', 'recallThreshold', 'recallDepth'].includes(key)
       ? Number(input.value)
       : input.value;
   if (key === 'autoAdvanceEnabled' && settings.autoAdvanceEnabled) {

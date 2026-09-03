@@ -75,13 +75,26 @@ export function buildRecallDocument(record) {
 
 export function buildRecallQuery(chat, targetFloorIndex, recentCount = 2) {
   const rows = Array.isArray(chat) ? chat : [];
+  const requestedCount = Math.floor(Number(recentCount));
+  if (!rows.length || !Number.isFinite(requestedCount) || requestedCount <= 0) return '';
   const target = Math.max(0, Math.min(Number(targetFloorIndex) || 0, Math.max(0, rows.length - 1)));
-  const count = Math.max(1, Math.min(RAW_FLOOR_LIMIT, Number(recentCount) || 2));
+  const count = Math.min(RAW_FLOOR_LIMIT, requestedCount);
   const start = Math.max(0, target - count + 1);
   return rows.slice(start, target + 1).map((message, offset) => {
     const speaker = message?.is_user ? '玩家' : normalizeText(message?.name) || '角色';
     return `第 ${start + offset + 1} 楼 · ${speaker}：${normalizeText(message?.mes)}`;
   }).join('\n');
+}
+
+export function buildRecallSummaryQuery(summaries, targetFloorIndex, recentCount = 2) {
+  const target = Number(targetFloorIndex);
+  const count = Math.max(1, Math.min(5, Math.floor(Number(recentCount) || 2)));
+  return (summaries ?? [])
+    .filter((record) => record.status === 'ready' && Number(record.floorIndex) <= target)
+    .sort((left, right) => left.floorIndex - right.floorIndex)
+    .slice(-count)
+    .map(buildRecallDocument)
+    .join('\n\n');
 }
 
 export function cosineSimilarity(left, right) {
@@ -183,16 +196,24 @@ export class SemanticRecallService {
     return this.storage.listVectors(chatKey);
   }
 
-  async recall({ chatKey, summaries, chat, targetFloorIndex, topK, threshold, force = false }) {
+  async recall({ chatKey, summaries, chat, targetFloorIndex, topK, threshold, recentRawFloorLimit = RAW_FLOOR_LIMIT, force = false }) {
     const vectors = await this.sync(chatKey, summaries, { force });
-    const query = buildRecallQuery(chat, targetFloorIndex);
+    const rawLimit = Math.max(0, Math.min(RAW_FLOOR_LIMIT, Math.floor(Number(recentRawFloorLimit) || 0)));
+    const query = rawLimit > 0
+      ? buildRecallQuery(chat, targetFloorIndex, rawLimit)
+      : buildRecallSummaryQuery(summaries, targetFloorIndex, 2);
     if (!query) return { indexedCount: vectors.length, records: [], prompt: '' };
     const [queryEmbedding] = await callOpenAiCompatibleEmbeddings({
       ...this.getCredentials(),
       model: this.getCredentials().embeddingModel,
       input: [query],
     });
-    const records = rankRecallMemories(vectors, queryEmbedding, { latestFloorIndex: targetFloorIndex, topK, threshold });
+    const records = rankRecallMemories(vectors, queryEmbedding, {
+      latestFloorIndex: targetFloorIndex,
+      topK,
+      threshold,
+      recentFloorLimit: rawLimit || 2,
+    });
     return { indexedCount: vectors.length, records, prompt: formatRecallPrompt(records) };
   }
 

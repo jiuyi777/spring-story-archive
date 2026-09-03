@@ -14,6 +14,7 @@ import {
   requestPlayerPreferenceProfile,
   requestStoryOptions,
 } from '../core/api-client.js';
+import { estimateTokens, REMOTE_INPUT_TOKEN_LIMIT } from '../core/privacy-payload.js';
 
 test('JSON parser accepts fenced model output', () => {
   assert.deepEqual(parseJsonEnvelope('```json\n{"summary":"春雨"}\n```'), { summary: '春雨' });
@@ -64,6 +65,18 @@ test('story options enforce the requested 4 to 12 count contract', async () => {
   const options = await requestStoryOptions(provider, { rollingSummary: '', recentFloors: [] }, { mode: 'third', count: 12 });
   assert.equal(options.length, 12);
   assert.equal(options.at(-1), '选项12');
+});
+
+test('API request payload stays within the remote input budget even with oversized profile data', async () => {
+  let userPrompt = '';
+  await requestStoryOptions(async ({ messages }) => {
+    userPrompt = messages[1].content;
+    return JSON.stringify({ options: Array.from({ length: 6 }, (_, index) => `选项${index + 1}`) });
+  }, { rollingSummary: '摘要', recentFloors: [] }, {
+    playerProfile: { summary: '非常长的偏好'.repeat(12000) },
+  });
+  assert.ok(estimateTokens(userPrompt) <= REMOTE_INPUT_TOKEN_LIMIT);
+  assert.match(userPrompt, /contentTruncated/);
 });
 
 test('mixed story option mode asks for all three narrative expressions', async () => {

@@ -305,6 +305,10 @@
   line-height: 1.5;
 }
 
+.ssa-summary-control-grid .ssa-summary-remote-control {
+  grid-column: 1 / -1;
+}
+
 .ssa-rollup-card {
   position: relative;
   border-radius: 4px 18px 4px 18px;
