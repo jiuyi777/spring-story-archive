@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>春序档案 · 视觉预览</title>
-  <link rel="stylesheet" href="style.css?v=0.5.3">
+  <link rel="stylesheet" href="style.css?v=0.5.4">
   <style>
     html, body { min-height: 100%; margin: 0; background: linear-gradient(145deg, #253a32, #557265); }
     .preview-note { position: fixed; left: 18px; bottom: 18px; z-index: 1; color: rgba(255,255,255,.65); font: 12px/1.5 system-ui; }
@@ -13,7 +13,7 @@
 <body>
   <p class="preview-note">春序档案 · 静态视觉预览</p>
   <script type="module">
-    import { createArchiveShell, focusLatestFloor, renderModelOptions, renderNpcs, renderPlayerProfile, renderRecallState, renderSnapshot, resetPreferenceTest, setOpen, setRetestConfirmOpen, switchTab, syncSettings } from './ui/view.js?v=0.5.3';
+    import { createArchiveShell, focusLatestFloor, renderModelOptions, renderNpcs, renderOptions, renderPlayerProfile, renderRecallState, renderSnapshot, resetPreferenceTest, setOpen, setRetestConfirmOpen, switchTab, syncSettings } from './ui/view.js?v=0.5.4';
     const root = createArchiveShell();
     root.addEventListener('click', (event) => {
       const tab = event.target.closest('[data-tab]');
@@ -155,11 +155,13 @@
       rollupTokenLimit: 6000,
       remoteRawFloorLimit: 0,
       expandedFloorCount: 5,
+      backfillBatchSize: 20,
       extraEndpoint: '',
       extraModel: '',
       optionMode: 'guided',
       optionCount: 6,
       optionSource: 'current',
+      optionsEnabled: true,
       preferenceNotes: '',
       preferenceQuizAnswers: {},
       storyExperiencePreferences: [],
@@ -205,8 +207,14 @@
       playerMemory: ['第 6 楼：玩家当时拒绝别人替自己做决定', '第 6 楼：玩家决定亲自查看西廊'],
       generatedAutomatically: true,
     }]);
+    renderOptions(root, [
+      '先不作答，沿着廊下残留的水痕去确认是谁刚刚离开。',
+      '回到书房追问沈砚：那封家书为什么偏偏在今晚出现？',
+      '暂时接受林素的条件，请她先展示登记簿中被改动的日期。',
+      '保持沉默，观察沈砚与林素见面时各自最先看向哪里。',
+    ], 'guided');
     renderModelOptions(root, ['example-chat-model', 'example-fast-model'], '已读取 2 个模型，可直接选择或继续手动输入。');
-    renderRecallState(root, { indexedCount: 42, recalledFloors: [7, 18, 31] });
+    renderRecallState(root, { indexedCount: 42, recalledFloors: [7, 18, 31], phase: 'injected' });
   </script>
 </body>
 </html>

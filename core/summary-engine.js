@@ -14,6 +14,10 @@ function errorText(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isRateLimitError(error) {
+  return /(?:\b429\b|too many requests|rate[\s_-]*limit|请求过多|限流)/i.test(errorText(error));
+}
+
 function summaryKey(chatKey, floorIndex) {
   return `${chatKey}::floor::${floorIndex}`;
 }
@@ -60,7 +64,15 @@ function formatFloorRecord(record) {
 }
 
 export class SummaryEngine {
-  constructor({ storage, getContext, getSettings, getExtraCredentials, onChange = () => {} }) {
+  constructor({
+    storage,
+    getContext,
+    getSettings,
+    getExtraCredentials,
+    onChange = () => {},
+    requestDelayMs = 1800,
+    wait = (delay) => new Promise((resolve) => setTimeout(resolve, delay)),
+  }) {
     this.storage = storage;
     this.getContext = getContext;
     this.getSettings = getSettings;
@@ -72,6 +84,8 @@ export class SummaryEngine {
     this.currentFloor = null;
     this.idleWaiters = [];
     this.abortController = null;
+    this.requestDelayMs = Math.max(0, Number(requestDelayMs) || 0);
+    this.wait = wait;
   }
 
   setChat(chatKey) {
@@ -150,12 +164,23 @@ export class SummaryEngine {
     void this.processQueue();
   }
 
-  async backfill() {
+  async backfill(limit = 20) {
+    if (this.running || this.queue.length) return { busy: true, queuedCount: 0, remainingCount: 0, totalMissing: 0 };
     await this.reconcile({ queueMissing: false });
     const summaries = await this.storage.listSummaries(this.chatKey);
-    for (const record of summaries) {
-      if (['missing', 'failed'].includes(record.status)) this.enqueue(record.floorIndex);
-    }
+    const missing = summaries
+      .filter((record) => ['missing', 'failed'].includes(record.status))
+      .filter((record) => record.floorIndex !== this.currentFloor && !this.queue.includes(record.floorIndex))
+      .sort((left, right) => left.floorIndex - right.floorIndex);
+    const batchSize = Math.min(30, Math.max(1, Number(limit) || 20));
+    const batch = missing.slice(0, batchSize);
+    for (const record of batch) this.enqueue(record.floorIndex);
+    return {
+      busy: false,
+      queuedCount: batch.length,
+      remainingCount: Math.max(0, missing.length - batch.length),
+      totalMissing: missing.length,
+    };
   }
 
   async regenerate(floorIndex) {
@@ -189,8 +214,13 @@ export class SummaryEngine {
       while (this.queue.length) {
         const floorIndex = this.queue.shift();
         this.currentFloor = floorIndex;
-        await this.summarizeFloor(floorIndex);
+        const result = await this.summarizeFloor(floorIndex);
         this.currentFloor = null;
+        if (result?.rateLimited) {
+          this.queue = [];
+          break;
+        }
+        if (this.queue.length && this.requestDelayMs > 0) await this.wait(this.requestDelayMs);
       }
     } finally {
       this.currentFloor = null;
@@ -247,10 +277,10 @@ export class SummaryEngine {
       });
       const result = await requestFloorSummary(this.makeProvider(settings.summarySource), payload);
       const latest = this.getContext().chat?.[floorIndex];
-      if (!latest || this.chatKey !== chatKey) return;
+      if (!latest || this.chatKey !== chatKey) return { skipped: true };
       if (fingerprintMessage(latest, floorIndex) !== messageFingerprint) {
         if (!this.queue.includes(floorIndex)) this.queue.push(floorIndex);
-        return;
+        return { skipped: true };
       }
       await this.storage.putSummary({
         key,
@@ -264,8 +294,10 @@ export class SummaryEngine {
         updatedAt: nowIso(),
       });
       await this.refreshRollup({ allowCompression: true });
+      await this.onChange();
+      return { ready: true };
     } catch (error) {
-      if (this.chatKey !== chatKey) return;
+      if (this.chatKey !== chatKey) return { skipped: true };
       await this.storage.putSummary({
         key,
         chatKey,
@@ -281,8 +313,9 @@ export class SummaryEngine {
         error: errorText(error),
         updatedAt: nowIso(),
       });
+      await this.onChange();
+      return { failed: true, rateLimited: isRateLimitError(error) };
     }
-    await this.onChange();
   }
 
   async refreshRollup({ allowCompression = true, forceCompression = false } = {}) {

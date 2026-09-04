@@ -38,10 +38,57 @@ test('NPC editor uses objective life fields and removes entrance and story hooks
 });
 
 test('summary controls use normal document flow and the mobile backfill action stays compact', async () => {
-  const source = await readFile(new URL('../style.css', import.meta.url), 'utf8');
+  const [source, view] = await Promise.all([
+    readFile(new URL('../style.css', import.meta.url), 'utf8'),
+    readFile(new URL('../ui/view.js', import.meta.url), 'utf8'),
+  ]);
   const controls = source.match(/\.ssa-summary-controls-card \{([\s\S]*?)\}/)?.[1] ?? '';
   assert.doesNotMatch(controls, /position:\s*sticky/);
   assert.match(source, /\[data-action="backfill"\][\s\S]*?white-space:\s*nowrap/);
+  assert.match(view, /data-setting="backfillBatchSize"/);
+  assert.match(view, /补全下一批/);
+  assert.doesNotMatch(view, /补全全部缺失摘要/);
+});
+
+test('automatic summary never queues all old floors from lifecycle paths', async () => {
+  const source = await readFile(new URL('../index.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /queueMissing:\s*getSettings\(\)\.autoSummarize/);
+  assert.doesNotMatch(source, /queueMissing:\s*true/);
+  assert.match(source, /switchCurrentChat\(\{ queueMissing: false \}\)/);
+});
+
+test('story options have an explicit master switch and choosing only fills the input', async () => {
+  const [view, index] = await Promise.all([
+    readFile(new URL('../ui/view.js', import.meta.url), 'utf8'),
+    readFile(new URL('../index.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(view, /switchControlMarkup\('optionsEnabled'/);
+  assert.match(view, /不会自动发送给 AI/);
+  assert.match(index, /if \(!settings\.optionsEnabled\) throw new Error/);
+  const chooseOption = index.match(/function chooseOption\(text\) \{([\s\S]*?)\n\}/)?.[1] ?? '';
+  assert.match(chooseOption, /#send_textarea/);
+  assert.doesNotMatch(chooseOption, /\.generate\(|#send_but|click\(/);
+});
+
+test('quiz choices stay local until the explicit analysis button is clicked', async () => {
+  const [view, index] = await Promise.all([
+    readFile(new URL('../ui/view.js', import.meta.url), 'utf8'),
+    readFile(new URL('../index.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(view, /点选答案只保存在当前页面，不会请求 AI/);
+  assert.match(index, /if \(quizInput \|\| event\.target\.closest\('\[data-experience-id\]'\)\) return/);
+});
+
+test('every feature toggle displays an explicit on or off label', async () => {
+  const [view, style] = await Promise.all([
+    readFile(new URL('../ui/view.js', import.meta.url), 'utf8'),
+    readFile(new URL('../style.css', import.meta.url), 'utf8'),
+  ]);
+  for (const setting of ['autoSummarize', 'optionsEnabled', 'autoAdvanceEnabled', 'autoNpcEnabled', 'semanticRecallEnabled']) {
+    assert.match(view, new RegExp(`switchControlMarkup\\('${setting}'`));
+  }
+  assert.match(view, /state\.textContent = enabled \? '已开启' : '已关闭'/);
+  assert.match(style, /\.ssa-switch-state\[data-state="on"\]/);
 });
 
 test('summary page exposes a zero-history remote floor mode', async () => {
@@ -69,6 +116,10 @@ test('semantic recall UI and generation interceptor are wired without permanent 
   assert.match(view, /自动找回相关往事/);
   assert.match(view, /data-action="rebuild-recall"/);
   assert.match(index, /setExtensionPrompt/);
+  assert.match(index, /phase: result\.prompt \? 'injected' : 'empty'/);
+  assert.match(view, /本轮已注入/);
+  const interceptor = index.match(/async function semanticRecallInterceptor[\s\S]*?\n\}\n\nfunction scheduleReconcile/)?.[0] ?? '';
+  assert.doesNotMatch(interceptor, /waitForIdle/);
   assert.equal(JSON.parse(manifest).generate_interceptor, 'springStoryArchiveSemanticRecallInterceptor');
   assert.match(style, /\.ssa-switch-row input \{[\s\S]*?padding:\s*0;[\s\S]*?border:\s*0;/);
   assert.doesNotMatch(`${view}\n${index}`, /高优先级记录/);

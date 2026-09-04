@@ -4,7 +4,7 @@ import {
   PREFERENCE_QUIZ_SOURCE,
   PREFERENCE_TRAIT_LABELS,
   STORY_EXPERIENCE_OPTIONS,
-} from '../core/preference-quiz.js?v=0.5.3';
+} from '../core/preference-quiz.js?v=0.5.4';
 
 const MODE_NAMES = {
   guided: '玩家行动（代入）',
@@ -13,6 +13,15 @@ const MODE_NAMES = {
   mixed: '混合表达',
 };
 const EXPERIENCE_NAMES = Object.fromEntries(STORY_EXPERIENCE_OPTIONS.map((option) => [option.id, option.label]));
+
+function switchControlMarkup(setting, label) {
+  return `
+    <span class="ssa-switch-control">
+      <span class="ssa-switch-state" data-switch-state-for="${setting}" data-state="off">已关闭</span>
+      <input type="checkbox" data-setting="${setting}" aria-label="${label}">
+    </span>
+  `;
+}
 
 function storyExperienceMarkup() {
   return STORY_EXPERIENCE_OPTIONS.map((option) => `
@@ -136,7 +145,17 @@ export function createArchiveShell() {
               <p class="ssa-kicker">每一楼都单独记录</p>
               <h2>逐楼摘要与档案</h2>
             </div>
-            <button class="ssa-primary-button" type="button" data-action="backfill">补全全部缺失摘要</button>
+            <div class="ssa-backfill-actions">
+              <span data-role="backfill-status">待补全 0 楼</span>
+              <label>每批
+                <select data-setting="backfillBatchSize">
+                  <option value="10">10 楼</option>
+                  <option value="20">20 楼</option>
+                  <option value="30">30 楼</option>
+                </select>
+              </label>
+              <button class="ssa-primary-button" type="button" data-action="backfill">补全下一批</button>
+            </div>
           </div>
           <div class="ssa-floor-list" data-role="floor-list"></div>
         </section>
@@ -145,7 +164,11 @@ export function createArchiveShell() {
           <article class="ssa-paper-card">
             <p class="ssa-kicker">生成剧情选项</p>
             <h2>选择选项的表达方式和数量</h2>
-            <p class="ssa-muted">选中后直接写入当前 SillyTavern 聊天输入框，由玩家确认发送。</p>
+            <p class="ssa-muted">点击选项只会填入当前 SillyTavern 输入框，不会自动发送给 AI。</p>
+            <label class="ssa-switch-row">
+              <span class="ssa-switch-copy"><strong>剧情选项功能</strong><small>由玩家决定是否开启；默认关闭。</small></span>
+              ${switchControlMarkup('optionsEnabled', '剧情选项功能')}
+            </label>
             <fieldset class="ssa-mode-fieldset">
               <legend>表达方式</legend>
               <div class="ssa-mode-options">
@@ -201,8 +224,8 @@ export function createArchiveShell() {
             <p class="ssa-kicker">自主推进剧情</p>
             <h2>后台推进</h2>
             <label class="ssa-switch-row">
-              <span><strong>由玩家主动开启</strong><small>在角色回复后后台生成下一步指令；默认关闭。</small></span>
-              <input type="checkbox" data-setting="autoAdvanceEnabled">
+              <span class="ssa-switch-copy"><strong>由玩家主动开启</strong><small>在角色回复后后台生成下一步指令；默认关闭。</small></span>
+              ${switchControlMarkup('autoAdvanceEnabled', '自主推进剧情')}
             </label>
             <div class="ssa-inline-fields is-two-columns">
               <label>导演接口
@@ -230,8 +253,8 @@ export function createArchiveShell() {
             <h2>NPC 人物档案</h2>
             <p class="ssa-muted">AI 根据剧情自行判断人物功能，再记录年龄、人生阶段、工作与客观状态，并用具体经历解释性格和矛盾。档案不预设固定口癖、小动作或行为模板。</p>
             <label class="ssa-switch-row">
-              <span><strong>按剧情需要自动建档与更新</strong><small>AI 自行判断当前缺少的剧情功能；剧情明确推进年龄、工作或人生阶段时更新，默认关闭。</small></span>
-              <input type="checkbox" data-setting="autoNpcEnabled">
+              <span class="ssa-switch-copy"><strong>按剧情需要自动建档与更新</strong><small>AI 自行判断当前缺少的剧情功能；剧情明确推进年龄、工作或人生阶段时更新，默认关闭。</small></span>
+              ${switchControlMarkup('autoNpcEnabled', 'NPC 自动建档与更新')}
             </label>
             <label>生成接口
               <select data-setting="npcSource">
@@ -260,6 +283,7 @@ export function createArchiveShell() {
           </header>
           <div class="ssa-test-intro">
             <strong>没有正确答案</strong>
+            <p>点选答案只保存在当前页面，不会请求 AI。只有点击“完成测试并生成分析”才会调用接口。</p>
             <p>用于调整互动、连续性、冲突强度与新奇程度，不作心理诊断。聊天里后来明确说出的选择和边界始终优先。</p>
           </div>
           <div class="ssa-quiz-questions">${preferenceQuizMarkup()}</div>
@@ -290,8 +314,8 @@ export function createArchiveShell() {
             <p class="ssa-kicker">摘要与大总结</p>
             <h2>摘要方式</h2>
             <label class="ssa-switch-row">
-              <span><strong>自动读取并摘要全部楼层</strong><small>打开聊天后补全旧楼层，并持续记录新楼层与玩家输入</small></span>
-              <input type="checkbox" data-setting="autoSummarize">
+              <span class="ssa-switch-copy"><strong>自动记录新楼层</strong><small>只摘要之后新增、编辑或重选的楼层；旧楼层由“补全下一批”分批处理。</small></span>
+              ${switchControlMarkup('autoSummarize', '自动记录新楼层')}
             </label>
             <label>摘要使用接口
               <select data-setting="summarySource">
@@ -309,8 +333,8 @@ export function createArchiveShell() {
             <p class="ssa-kicker">摘要语义检索</p>
             <h2>语义回忆</h2>
             <label class="ssa-switch-row">
-              <span><strong>自动找回相关往事</strong><small>只向量化楼层摘要；默认关闭。生成前召回相关旧摘要并注入真实提示词。</small></span>
-              <input type="checkbox" data-setting="semanticRecallEnabled">
+              <span class="ssa-switch-copy"><strong>自动找回相关往事</strong><small>只向量化楼层摘要；默认关闭。生成前召回相关旧摘要并注入真实提示词。</small></span>
+              ${switchControlMarkup('semanticRecallEnabled', '自动找回相关往事')}
             </label>
             <p class="ssa-notice">不会把某次拒绝、同意或边界永久化。同一主题后来有新表态时，以更晚楼层为当前状态，旧表态只保留为历史。</p>
             <label>嵌入模型（优先自动读取）
@@ -499,6 +523,9 @@ export function renderSnapshot(root, snapshot, { expandedFloorCount = 5, resetDi
   root.querySelector('[data-role="rollup-text"]').textContent = rollup?.text || '还没有可用摘要。';
   root.querySelector('[data-role="rollup-floor"]').textContent = `已摘要 ${rollup?.readyFloors ?? 0} / ${snapshot.totalFloors ?? snapshot.summaries.length} 楼`;
   root.querySelector('[data-role="rollup-token"]').textContent = `约 ${rollup?.tokenEstimate ?? 0} token`;
+  const missingCount = snapshot.summaries.filter((record) => ['missing', 'failed'].includes(record.status)).length;
+  const backfillStatus = root.querySelector('[data-role="backfill-status"]');
+  if (backfillStatus) backfillStatus.textContent = `待补全 ${missingCount} 楼`;
 }
 
 export function focusLatestFloor(root, { behavior = 'smooth' } = {}) {
@@ -790,18 +817,28 @@ export function renderModelOptions(root, models, message = '') {
   if (status && message) status.textContent = message;
 }
 
-export function renderRecallState(root, { indexedCount = 0, recalledFloors = [], error = '' } = {}) {
+export function renderRecallState(root, { indexedCount = 0, recalledFloors = [], error = '', phase = 'disabled' } = {}) {
   const status = root.querySelector('[data-role="recall-status"]');
   if (!status) return;
   if (error) {
-    status.textContent = `语义回忆暂停：${error}`;
+    status.textContent = `注入失败：${error}`;
     status.dataset.tone = 'error';
     return;
   }
-  const recalled = recalledFloors.length
-    ? `本轮召回第 ${recalledFloors.map((floor) => floor + 1).join('、')} 楼`
-    : '本轮未召回';
-  status.textContent = `已索引 ${indexedCount} 楼 · ${recalled}`;
+  const floorText = recalledFloors.map((floor) => floor + 1).join('、');
+  const messages = {
+    disabled: '注入已关闭',
+    armed: `已开启，等待下一次酒馆生成 · 已索引 ${indexedCount} 楼`,
+    preparing: '正在检索并准备本轮注入……',
+    injected: `本轮已注入 ${recalledFloors.length} 条摘要${floorText ? ` · 第 ${floorText} 楼` : ''}`,
+    empty: `本轮没有匹配内容 · 已索引 ${indexedCount} 楼`,
+    feature: recalledFloors.length
+      ? `本次功能请求已检索 ${recalledFloors.length} 条摘要`
+      : `本次功能请求没有匹配内容 · 已索引 ${indexedCount} 楼`,
+    indexed: `语义索引已建立 · 共 ${indexedCount} 楼 · 等待下一次酒馆生成`,
+    matched: `已检索 ${recalledFloors.length} 条摘要 · 尚未注入`,
+  };
+  status.textContent = messages[phase] ?? messages.armed;
   status.dataset.tone = 'normal';
 }
 
@@ -813,6 +850,18 @@ export function syncSettings(root, settings, apiKey = '') {
     else if (input.type === 'radio') input.checked = input.value === String(value ?? '');
     else input.value = String(value ?? '');
   }
+  for (const state of root.querySelectorAll('[data-switch-state-for]')) {
+    const enabled = Boolean(settings[state.dataset.switchStateFor]);
+    state.textContent = enabled ? '已开启' : '已关闭';
+    state.dataset.state = enabled ? 'on' : 'off';
+  }
+  const optionsButton = root.querySelector('[data-action="generate-options"]');
+  if (optionsButton) {
+    optionsButton.disabled = !settings.optionsEnabled;
+    optionsButton.textContent = settings.optionsEnabled ? '生成剧情选项' : '剧情选项已关闭';
+  }
+  const optionsList = root.querySelector('[data-role="options-list"]');
+  if (optionsList) optionsList.hidden = !settings.optionsEnabled;
   const secret = root.querySelector('[data-secret="extraApiKey"]');
   if (secret && document.activeElement !== secret) secret.value = apiKey;
   for (const input of root.querySelectorAll('[data-quiz-id]')) {

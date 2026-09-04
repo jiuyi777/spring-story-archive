@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { SummaryEngine } from '../core/summary-engine.js';
 import { createMemoryStorage } from '../core/storage.js';
 
-function makeHarness({ chat, generateRaw, settings = {} }) {
+function makeHarness({ chat, generateRaw, settings = {}, requestDelayMs = 0, wait }) {
   const storage = createMemoryStorage();
   const context = { chat, generateRaw };
   const mergedSettings = {
@@ -16,6 +16,8 @@ function makeHarness({ chat, generateRaw, settings = {} }) {
     getContext: () => context,
     getSettings: () => mergedSettings,
     getExtraCredentials: () => ({}),
+    requestDelayMs,
+    ...(wait ? { wait } : {}),
   });
   engine.setChat('chat-a');
   return { engine, storage, context };
@@ -75,6 +77,60 @@ test('queueMissing automatically summarizes every detected floor', async () => {
   assert.equal(calls, 2);
   assert.deepEqual(snapshot.summaries.map((record) => record.status), ['ready', 'ready']);
   assert.equal(snapshot.summaries[0].priority, 'player-statement');
+});
+
+test('backfill handles only the selected batch and the next click continues', async () => {
+  let calls = 0;
+  const { engine } = makeHarness({
+    chat: Array.from({ length: 45 }, (_, index) => ({ mes: `第 ${index + 1} 楼` })),
+    generateRaw: async () => {
+      calls += 1;
+      return JSON.stringify({ summary: `摘要${calls}`, characters: [], relationships: [], clues: [], timeline: [] });
+    },
+  });
+  await engine.reconcile({ queueMissing: false });
+
+  const first = await engine.backfill(20);
+  assert.deepEqual(first, { busy: false, queuedCount: 20, remainingCount: 25, totalMissing: 45 });
+  assert.equal((await engine.backfill(20)).busy, true);
+  await engine.waitForIdle();
+  assert.equal(calls, 20);
+
+  const second = await engine.backfill(20);
+  assert.deepEqual(second, { busy: false, queuedCount: 20, remainingCount: 5, totalMissing: 25 });
+  await engine.waitForIdle();
+  assert.equal(calls, 40);
+});
+
+test('summary queue waits between requests', async () => {
+  const delays = [];
+  const { engine } = makeHarness({
+    chat: [{ mes: '一' }, { mes: '二' }, { mes: '三' }],
+    requestDelayMs: 1800,
+    wait: async (delay) => delays.push(delay),
+    generateRaw: async () => JSON.stringify({ summary: '摘要', characters: [], relationships: [], clues: [], timeline: [] }),
+  });
+  await engine.reconcile({ queueMissing: false });
+  await engine.backfill(3);
+  await engine.waitForIdle();
+  assert.deepEqual(delays, [1800, 1800]);
+});
+
+test('a 429 stops the current batch and leaves later floors pending', async () => {
+  let calls = 0;
+  const { engine } = makeHarness({
+    chat: [{ mes: '一' }, { mes: '二' }, { mes: '三' }],
+    generateRaw: async () => {
+      calls += 1;
+      throw new Error('Custom OpenAI endpoint failed with status 429: rate limit exceeded');
+    },
+  });
+  await engine.reconcile({ queueMissing: false });
+  await engine.backfill(3);
+  await engine.waitForIdle();
+  const snapshot = await engine.getSnapshot();
+  assert.equal(calls, 1);
+  assert.deepEqual(snapshot.summaries.map((record) => record.status), ['failed', 'missing', 'missing']);
 });
 
 test('the 100th summarized floor creates a compression checkpoint', async () => {

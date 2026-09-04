@@ -46,11 +46,13 @@ const DEFAULT_SETTINGS = Object.freeze({
   rollupTokenLimit: 6000,
   remoteRawFloorLimit: 0,
   expandedFloorCount: 5,
+  backfillBatchSize: 20,
   extraEndpoint: '',
   extraModel: '',
   optionMode: 'guided',
   optionCount: 6,
   optionSource: 'current',
+  optionsEnabled: false,
   preferenceNotes: '',
   preferenceQuizAnswers: {},
   storyExperiencePreferences: [],
@@ -82,7 +84,7 @@ let modelFetchTimer = 0;
 let postGenerationTimer = 0;
 let npcCheckRunning = false;
 let resetFloorDisclosureOnNextRender = false;
-let recallState = { indexedCount: 0, recalledFloors: [], error: '' };
+let recallState = { indexedCount: 0, recalledFloors: [], error: '', phase: 'disabled' };
 const pendingSummaryFloors = new Set();
 
 function profileKey(chatKey, kind) {
@@ -229,7 +231,12 @@ async function switchCurrentChat({ queueMissing = false } = {}) {
   const chatKey = currentChatKey();
   if (engine.chatKey !== chatKey) {
     latestReadySignature = '';
-    recallState = { indexedCount: 0, recalledFloors: [], error: '' };
+    recallState = {
+      indexedCount: 0,
+      recalledFloors: [],
+      error: '',
+      phase: getSettings().semanticRecallEnabled ? 'armed' : 'disabled',
+    };
     clearRecallPrompt();
   }
   engine.setChat(chatKey);
@@ -239,10 +246,10 @@ async function switchCurrentChat({ queueMissing = false } = {}) {
     return;
   }
   await engine.reconcile({ queueMissing });
-  setStatus(root, queueMissing ? '已自动读取楼层，正在补全缺失摘要' : '本地档案已同步');
+  setStatus(root, '本地档案已同步');
 }
 
-async function recallForCurrentContext({ force = false } = {}) {
+async function recallForCurrentContext({ force = false, phase = 'matched' } = {}) {
   const settings = getSettings();
   if (!settings.semanticRecallEnabled || !engine?.chatKey || !recallService) {
     return { indexedCount: 0, records: [], prompt: '' };
@@ -265,6 +272,7 @@ async function recallForCurrentContext({ force = false } = {}) {
     indexedCount: result.indexedCount,
     recalledFloors: result.records.map((record) => record.floorIndex),
     error: '',
+    phase,
   };
   renderRecallState(root, recallState);
   return result;
@@ -273,10 +281,10 @@ async function recallForCurrentContext({ force = false } = {}) {
 async function addSemanticRecall(payload) {
   if (!getSettings().semanticRecallEnabled) return payload;
   try {
-    const result = await recallForCurrentContext();
+    const result = await recallForCurrentContext({ phase: 'feature' });
     return { ...payload, semanticRecall: result.prompt || '' };
   } catch (error) {
-    recallState = { ...recallState, recalledFloors: [], error: error.message };
+    recallState = { ...recallState, recalledFloors: [], error: error.message, phase: 'error' };
     renderRecallState(root, recallState);
     return { ...payload, semanticRecall: '' };
   }
@@ -286,12 +294,15 @@ async function semanticRecallInterceptor(chat, contextSize, abort, type) {
   const context = getContext();
   if (!getSettings().semanticRecallEnabled || !engine?.chatKey || type === 'quiet') {
     clearRecallPrompt(context);
+    recallState = { ...recallState, recalledFloors: [], error: '', phase: getSettings().semanticRecallEnabled ? 'armed' : 'disabled' };
+    renderRecallState(root, recallState);
     return;
   }
   try {
     if (typeof context.setExtensionPrompt !== 'function') throw new Error('当前酒馆版本不支持生成前注入。');
-    await engine.waitForIdle();
-    const result = await recallForCurrentContext();
+    recallState = { ...recallState, recalledFloors: [], error: '', phase: 'preparing' };
+    renderRecallState(root, recallState);
+    const result = await recallForCurrentContext({ phase: 'preparing' });
     context.setExtensionPrompt?.(
       RECALL_PROMPT_ID,
       result.prompt,
@@ -300,9 +311,16 @@ async function semanticRecallInterceptor(chat, contextSize, abort, type) {
       false,
       0,
     );
+    recallState = {
+      ...recallState,
+      phase: result.prompt ? 'injected' : 'empty',
+      recalledFloors: result.records.map((record) => record.floorIndex),
+      error: '',
+    };
+    renderRecallState(root, recallState);
   } catch (error) {
     clearRecallPrompt(context);
-    recallState = { ...recallState, recalledFloors: [], error: error.message };
+    recallState = { ...recallState, recalledFloors: [], error: error.message, phase: 'error' };
     renderRecallState(root, recallState);
   }
 }
@@ -544,6 +562,7 @@ async function runAutoAdvance() {
 
 async function generateOptions() {
   const settings = getSettings();
+  if (!settings.optionsEnabled) throw new Error('请先开启剧情选项功能。');
   const context = getContext();
   if (!context.chat.length) throw new Error('当前聊天还没有可生成选项的内容。');
   setStatus(root, '正在生成剧情选项……');
@@ -681,7 +700,7 @@ function chooseOption(text) {
   textarea.value = text;
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
   textarea.focus();
-  setOpen(root, false);
+  setStatus(root, '选项已填入酒馆输入框，尚未发送');
 }
 
 async function testExtraApi() {
@@ -736,14 +755,18 @@ async function handleAction(action, button) {
     setOpen(root, true);
     switchTab(root, 'summary');
     requestLatestSummaryFocus();
-    await switchCurrentChat({ queueMissing: getSettings().autoSummarize });
+    await switchCurrentChat({ queueMissing: false });
     window.requestAnimationFrame(focusLatestSummary);
     return;
   }
   if (action === 'close') return setOpen(root, false);
   if (action === 'backfill') {
-    setStatus(root, '已开始补全缺失摘要');
-    await engine.backfill();
+    const result = await engine.backfill(getSettings().backfillBatchSize);
+    setStatus(root, result.busy
+      ? '上一批仍在处理中，请完成后再补下一批'
+      : result.queuedCount
+        ? `本批已加入 ${result.queuedCount} 楼，剩余 ${result.remainingCount} 楼待补全`
+        : '没有需要补全的楼层');
     return;
   }
   if (action === 'regenerate-floor') {
@@ -787,7 +810,7 @@ async function handleAction(action, button) {
     setStatus(root, '正在重建语义索引……');
     const snapshot = await engine.getSnapshot();
     const vectors = await recallService.rebuild(engine.chatKey, snapshot.summaries);
-    recallState = { indexedCount: vectors.length, recalledFloors: [], error: '' };
+    recallState = { indexedCount: vectors.length, recalledFloors: [], error: '', phase: 'indexed' };
     renderRecallState(root, recallState);
     setStatus(root, `语义索引已重建，共 ${vectors.length} 楼`);
     return;
@@ -799,7 +822,7 @@ async function handleSettingChange(input) {
   const settings = getSettings();
   settings[key] = input.type === 'checkbox'
     ? input.checked
-    : ['optionCount', 'rollupTokenLimit', 'remoteRawFloorLimit', 'advanceRounds', 'expandedFloorCount', 'recallTopK', 'recallThreshold', 'recallDepth'].includes(key)
+    : ['optionCount', 'backfillBatchSize', 'rollupTokenLimit', 'remoteRawFloorLimit', 'advanceRounds', 'expandedFloorCount', 'recallTopK', 'recallThreshold', 'recallDepth'].includes(key)
       ? Number(input.value)
       : input.value;
   if (key === 'autoAdvanceEnabled' && settings.autoAdvanceEnabled) {
@@ -814,15 +837,23 @@ async function handleSettingChange(input) {
     }
   }
   if (key === 'autoAdvanceEnabled' && !settings.autoAdvanceEnabled) autoAdvanceRemaining = 0;
-  if (key === 'semanticRecallEnabled' && !settings.semanticRecallEnabled) {
-    clearRecallPrompt();
-    recallState = { indexedCount: 0, recalledFloors: [], error: '' };
+  if (key === 'semanticRecallEnabled') {
+    if (settings.semanticRecallEnabled && typeof getContext().setExtensionPrompt !== 'function') {
+      settings.semanticRecallEnabled = false;
+      input.checked = false;
+      recallState = { indexedCount: 0, recalledFloors: [], error: '当前酒馆版本不支持生成前注入。', phase: 'error' };
+    } else if (settings.semanticRecallEnabled) {
+      recallState = { ...recallState, recalledFloors: [], error: '', phase: 'armed' };
+    } else {
+      clearRecallPrompt();
+      recallState = { indexedCount: 0, recalledFloors: [], error: '', phase: 'disabled' };
+    }
     renderRecallState(root, recallState);
   }
   saveSettings();
   syncSettings(root, settings, getApiKey());
   if (key === 'autoSummarize' && settings.autoSummarize) {
-    await switchCurrentChat({ queueMissing: true });
+    await switchCurrentChat({ queueMissing: false });
   }
   if (key === 'expandedFloorCount') {
     resetFloorDisclosureOnNextRender = true;
@@ -882,7 +913,7 @@ function bindHostEvents() {
     autoAdvanceRemaining = 0;
     pendingSummaryFloors.clear();
     requestLatestSummaryFocus();
-    scheduleReconcile({ queueMissing: getSettings().autoSummarize });
+    scheduleReconcile({ queueMissing: false });
   });
 }
 
@@ -904,7 +935,14 @@ async function initialize() {
     globalThis[RECALL_INTERCEPTOR] = semanticRecallInterceptor;
     bindUi();
     bindHostEvents();
-    await switchCurrentChat({ queueMissing: getSettings().autoSummarize });
+    if (getSettings().semanticRecallEnabled && typeof getContext().setExtensionPrompt !== 'function') {
+      getSettings().semanticRecallEnabled = false;
+      recallState = { indexedCount: 0, recalledFloors: [], error: '当前酒馆版本不支持生成前注入。', phase: 'error' };
+      saveSettings();
+    } else {
+      recallState.phase = getSettings().semanticRecallEnabled ? 'armed' : 'disabled';
+    }
+    await switchCurrentChat({ queueMissing: false });
     syncSettings(root, getSettings(), getApiKey());
     if (getSettings().extraEndpoint) scheduleModelRefresh();
   } catch (error) {

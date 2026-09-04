@@ -401,6 +401,28 @@
   font-size: 11px;
 }
 
+.ssa-backfill-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: rgba(38, 61, 52, .68);
+  font-size: 11px;
+}
+
+.ssa-backfill-actions label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.ssa-backfill-actions select {
+  width: auto;
+  min-height: 34px;
+  padding: 0 24px 0 9px;
+}
+
 .ssa-primary-button,
 .ssa-secondary-button,
 .ssa-text-button {
@@ -422,6 +444,15 @@
   border: 1px solid var(--ssa-deep);
   color: white !important;
   background: var(--ssa-deep);
+}
+
+.ssa-primary-button:disabled {
+  border-color: #aaa998;
+  color: #686b65 !important;
+  background: #d9d6c8;
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .ssa-secondary-button {
@@ -776,9 +807,38 @@
   border-bottom: 1px solid rgba(59, 88, 75, .12);
 }
 
-.ssa-switch-row span {
+.ssa-switch-copy {
   display: grid;
   gap: 4px;
+}
+
+.ssa-switch-control {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.ssa-switch-state {
+  display: inline-flex;
+  min-width: 49px;
+  min-height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 7px;
+  border: 1px solid rgba(59, 88, 75, .28);
+  border-radius: 999px;
+  color: #56635d;
+  background: #e7e3d5;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ssa-switch-state[data-state="on"] {
+  border-color: #355f50;
+  color: #fffef8;
+  background: #355f50;
 }
 
 .ssa-switch-row input {
@@ -808,7 +868,8 @@
 }
 
 .ssa-switch-row input:checked {
-  background: var(--ssa-jade);
+  background: #355f50;
+  box-shadow: inset 0 0 0 1px #25473b, 0 0 0 2px rgba(53, 95, 80, .12);
 }
 
 .ssa-switch-row input:checked::before {
@@ -1632,8 +1693,28 @@
   }
 
   .ssa-list-heading {
-    align-items: end;
+    align-items: stretch;
+    flex-direction: column;
     margin-top: 23px;
+  }
+
+  .ssa-backfill-actions {
+    justify-content: space-between;
+  }
+
+  .ssa-backfill-actions > [data-role="backfill-status"] {
+    margin-right: auto;
+  }
+
+  .ssa-switch-row {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .ssa-switch-control {
+    flex-direction: column-reverse;
+    align-items: flex-end;
+    gap: 5px;
   }
 
   .ssa-list-heading .ssa-primary-button {
