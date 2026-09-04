@@ -3,7 +3,7 @@
   "id": "spring-story-archive",
   "displayName": "春序档案",
   "author": "凡人歌 × 奶龙",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "minimumClientVersion": "1.14.0",
   "loadingOrder": 120,
   "withCss": true,

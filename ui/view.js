@@ -4,7 +4,7 @@ import {
   PREFERENCE_QUIZ_SOURCE,
   PREFERENCE_TRAIT_LABELS,
   STORY_EXPERIENCE_OPTIONS,
-} from '../core/preference-quiz.js?v=0.5.4';
+} from '../core/preference-quiz.js?v=0.5.5';
 
 const MODE_NAMES = {
   guided: '玩家行动（代入）',
@@ -107,14 +107,14 @@ export function createArchiveShell() {
                 </select>
                 <small>更早楼层默认折叠，点击楼层标题即可查看。</small>
               </label>
-              <label class="ssa-summary-remote-control">发送给摘要/剧情接口的历史原文
+              <label class="ssa-summary-remote-control">发送给剧情辅助接口的历史原文
                 <select data-setting="remoteRawFloorLimit">
                   <option value="0">不发送历史原文</option>
                   <option value="1">最近 1 楼</option>
                   <option value="3">最近 3 楼</option>
                   <option value="5">最近 5 楼</option>
                 </select>
-                <small>默认不发送。逐楼摘要仍只发送正在整理的当前一楼，否则无法生成该楼摘要；所有请求另有约 6500 token 的硬上限。</small>
+                <small>默认不发送。批量逐楼摘要只发送正在整理的本批楼层，否则无法生成这些摘要；所有请求另有约 6500 token 的硬上限。</small>
               </label>
             </div>
           </article>
@@ -151,12 +151,12 @@ export function createArchiveShell() {
                 <select data-setting="backfillBatchSize">
                   <option value="10">10 楼</option>
                   <option value="20">20 楼</option>
-                  <option value="30">30 楼</option>
                 </select>
               </label>
               <button class="ssa-primary-button" type="button" data-action="backfill">补全下一批</button>
             </div>
           </div>
+          <p class="ssa-muted">同一批楼层只调用一次摘要 API，返回后仍分别保存为逐楼摘要；内容过长时会自动拆批。</p>
           <div class="ssa-floor-list" data-role="floor-list"></div>
         </section>
 
@@ -878,7 +878,7 @@ export function syncSettings(root, settings, apiKey = '') {
     const rawLimit = Number(settings.remoteRawFloorLimit) || 0;
     boundary.textContent = rawLimit > 0
       ? `滚动总摘要 + 最近 ${rawLimit} 楼原文`
-      : '不发送历史楼层原文 · 单楼摘要仅发送当前一楼';
+      : '不发送历史楼层原文 · 批量摘要只发送本批楼层';
   }
 }
 

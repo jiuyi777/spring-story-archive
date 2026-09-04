@@ -23,14 +23,34 @@ function makeHarness({ chat, generateRaw, settings = {}, requestDelayMs = 0, wai
   return { engine, storage, context };
 }
 
+function readBatchPayload({ prompt }) {
+  return JSON.parse(String(prompt ?? '').replace(/^user:\s*/i, ''));
+}
+
+function batchResponse(request, { omitFloors = [], prefix = '摘要' } = {}) {
+  const payload = readBatchPayload(request);
+  return JSON.stringify({
+    floors: payload.targetFloors
+      .filter(({ floor }) => !omitFloors.includes(floor))
+      .map(({ floor }) => ({
+        floor,
+        summary: `${prefix}${floor}`,
+        characters: [],
+        relationships: [],
+        clues: [],
+        timeline: [],
+      })),
+  });
+}
+
 test('a failed floor keeps its record and can be regenerated', async () => {
   let calls = 0;
   const { engine } = makeHarness({
     chat: [{ is_user: false, name: '角色', mes: '雨落在窗沿。', swipe_id: 0 }],
-    generateRaw: async () => {
+    generateRaw: async (request) => {
       calls += 1;
       if (calls === 1) throw new Error('temporary failure');
-      return JSON.stringify({ summary: '窗外开始落雨。', characters: [], relationships: [], clues: [], timeline: ['傍晚'] });
+      return batchResponse(request, { prefix: '窗外开始落雨。' });
     },
   });
   await engine.reconcile();
@@ -44,13 +64,13 @@ test('a failed floor keeps its record and can be regenerated', async () => {
   await engine.waitForIdle();
   snapshot = await engine.getSnapshot();
   assert.equal(snapshot.summaries[0].status, 'ready');
-  assert.equal(snapshot.summaries[0].summary, '窗外开始落雨。');
+  assert.equal(snapshot.summaries[0].summary, '窗外开始落雨。1');
 });
 
 test('player output is stored locally as a complete chronological floor record', async () => {
   const { engine } = makeHarness({
     chat: [{ is_user: true, name: '玩家', mes: '我拒绝离开，并决定亲自查看西廊。', swipe_id: 0 }],
-    generateRaw: async () => JSON.stringify({ summary: '玩家拒绝离开并选择查看西廊。' }),
+    generateRaw: async (request) => batchResponse(request),
   });
   await engine.reconcile();
   const snapshot = await engine.getSnapshot();
@@ -59,22 +79,25 @@ test('player output is stored locally as a complete chronological floor record',
   assert.equal(snapshot.summaries[0].userText, '我拒绝离开，并决定亲自查看西廊。');
 });
 
-test('queueMissing automatically summarizes every detected floor', async () => {
+test('a new player floor and character reply share one API request', async () => {
   let calls = 0;
+  let sentFloors = [];
   const { engine } = makeHarness({
     chat: [
       { is_user: true, name: '玩家', mes: '我选择留下。', swipe_id: 0 },
       { is_user: false, name: '角色', mes: '角色推开了西廊的门。', swipe_id: 0 },
     ],
-    generateRaw: async () => {
+    generateRaw: async (request) => {
       calls += 1;
-      return JSON.stringify({ summary: `摘要${calls}`, characters: [], relationships: [], clues: [], timeline: [] });
+      sentFloors = readBatchPayload(request).targetFloors;
+      return batchResponse(request);
     },
   });
   await engine.reconcile({ queueMissing: true });
   await engine.waitForIdle();
   const snapshot = await engine.getSnapshot();
-  assert.equal(calls, 2);
+  assert.equal(calls, 1);
+  assert.deepEqual(sentFloors.map(({ floor, kind }) => [floor, kind]), [[1, 'user'], [2, 'assistant']]);
   assert.deepEqual(snapshot.summaries.map((record) => record.status), ['ready', 'ready']);
   assert.equal(snapshot.summaries[0].priority, 'player-statement');
 });
@@ -83,9 +106,10 @@ test('backfill handles only the selected batch and the next click continues', as
   let calls = 0;
   const { engine } = makeHarness({
     chat: Array.from({ length: 45 }, (_, index) => ({ mes: `第 ${index + 1} 楼` })),
-    generateRaw: async () => {
+    settings: { backfillBatchSize: 20 },
+    generateRaw: async (request) => {
       calls += 1;
-      return JSON.stringify({ summary: `摘要${calls}`, characters: [], relationships: [], clues: [], timeline: [] });
+      return batchResponse(request, { prefix: `第${calls}批-` });
     },
   });
   await engine.reconcile({ queueMissing: false });
@@ -94,21 +118,86 @@ test('backfill handles only the selected batch and the next click continues', as
   assert.deepEqual(first, { busy: false, queuedCount: 20, remainingCount: 25, totalMissing: 45 });
   assert.equal((await engine.backfill(20)).busy, true);
   await engine.waitForIdle();
-  assert.equal(calls, 20);
+  assert.equal(calls, 1);
 
   const second = await engine.backfill(20);
   assert.deepEqual(second, { busy: false, queuedCount: 20, remainingCount: 5, totalMissing: 25 });
   await engine.waitForIdle();
-  assert.equal(calls, 40);
+  assert.equal(calls, 2);
+});
+
+test('ten or twenty short floors each use one API request', async (t) => {
+  for (const count of [10, 20]) {
+    await t.test(`${count} floors`, async () => {
+      let calls = 0;
+      const { engine } = makeHarness({
+        chat: Array.from({ length: count }, (_, index) => ({ mes: `短楼层 ${index + 1}` })),
+        settings: { backfillBatchSize: count },
+        generateRaw: async (request) => {
+          calls += 1;
+          return batchResponse(request);
+        },
+      });
+      await engine.reconcile({ queueMissing: true });
+      await engine.waitForIdle();
+      assert.equal(calls, 1);
+      assert.deepEqual((await engine.getSnapshot()).summaries.map((record) => record.status), Array(count).fill('ready'));
+    });
+  }
+});
+
+test('oversized floor content is split across multiple API requests', async () => {
+  let calls = 0;
+  const { engine } = makeHarness({
+    chat: Array.from({ length: 3 }, (_, index) => ({ mes: `第${index + 1}楼${'长'.repeat(2500)}` })),
+    settings: { backfillBatchSize: 20 },
+    generateRaw: async (request) => {
+      calls += 1;
+      return batchResponse(request);
+    },
+  });
+  await engine.reconcile({ queueMissing: true });
+  await engine.waitForIdle();
+  assert.equal(calls, 3);
+});
+
+test('one omitted model row fails without discarding the other floor summaries', async () => {
+  const { engine } = makeHarness({
+    chat: [{ mes: '一' }, { mes: '二' }, { mes: '三' }],
+    generateRaw: async (request) => batchResponse(request, { omitFloors: [2] }),
+  });
+  await engine.reconcile({ queueMissing: true });
+  await engine.waitForIdle();
+  const snapshot = await engine.getSnapshot();
+  assert.deepEqual(snapshot.summaries.map((record) => record.status), ['ready', 'failed', 'ready']);
+  assert.match(snapshot.summaries[1].error, /漏掉/);
+});
+
+test('regenerating one floor requests only that floor', async () => {
+  const batches = [];
+  const { engine } = makeHarness({
+    chat: [{ mes: '一' }, { mes: '二' }],
+    generateRaw: async (request) => {
+      const payload = readBatchPayload(request);
+      batches.push(payload.targetFloors.map(({ floor }) => floor));
+      return batchResponse(request);
+    },
+  });
+  await engine.reconcile({ queueMissing: true });
+  await engine.waitForIdle();
+  await engine.regenerate(1);
+  await engine.waitForIdle();
+  assert.deepEqual(batches, [[1, 2], [2]]);
 });
 
 test('summary queue waits between requests', async () => {
   const delays = [];
   const { engine } = makeHarness({
     chat: [{ mes: '一' }, { mes: '二' }, { mes: '三' }],
+    settings: { backfillBatchSize: 1 },
     requestDelayMs: 1800,
     wait: async (delay) => delays.push(delay),
-    generateRaw: async () => JSON.stringify({ summary: '摘要', characters: [], relationships: [], clues: [], timeline: [] }),
+    generateRaw: async (request) => batchResponse(request),
   });
   await engine.reconcile({ queueMissing: false });
   await engine.backfill(3);
@@ -120,6 +209,7 @@ test('a 429 stops the current batch and leaves later floors pending', async () =
   let calls = 0;
   const { engine } = makeHarness({
     chat: [{ mes: '一' }, { mes: '二' }, { mes: '三' }],
+    settings: { backfillBatchSize: 1 },
     generateRaw: async () => {
       calls += 1;
       throw new Error('Custom OpenAI endpoint failed with status 429: rate limit exceeded');

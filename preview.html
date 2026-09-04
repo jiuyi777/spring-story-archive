@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>春序档案 · 视觉预览</title>
-  <link rel="stylesheet" href="style.css?v=0.5.4">
+  <link rel="stylesheet" href="style.css?v=0.5.5">
   <style>
     html, body { min-height: 100%; margin: 0; background: linear-gradient(145deg, #253a32, #557265); }
     .preview-note { position: fixed; left: 18px; bottom: 18px; z-index: 1; color: rgba(255,255,255,.65); font: 12px/1.5 system-ui; }
@@ -13,7 +13,7 @@
 <body>
   <p class="preview-note">春序档案 · 静态视觉预览</p>
   <script type="module">
-    import { createArchiveShell, focusLatestFloor, renderModelOptions, renderNpcs, renderOptions, renderPlayerProfile, renderRecallState, renderSnapshot, resetPreferenceTest, setOpen, setRetestConfirmOpen, switchTab, syncSettings } from './ui/view.js?v=0.5.4';
+    import { createArchiveShell, focusLatestFloor, renderModelOptions, renderNpcs, renderOptions, renderPlayerProfile, renderRecallState, renderSnapshot, resetPreferenceTest, setOpen, setRetestConfirmOpen, switchTab, syncSettings } from './ui/view.js?v=0.5.5';
     const root = createArchiveShell();
     root.addEventListener('click', (event) => {
       const tab = event.target.closest('[data-tab]');
@@ -155,7 +155,7 @@
       rollupTokenLimit: 6000,
       remoteRawFloorLimit: 0,
       expandedFloorCount: 5,
-      backfillBatchSize: 20,
+      backfillBatchSize: 10,
       extraEndpoint: '',
       extraModel: '',
       optionMode: 'guided',

@@ -123,27 +123,63 @@ function payloadText(payload) {
   }, null, 2);
 }
 
-export async function requestFloorSummary(provider, payload) {
-  const raw = await provider({
-    maxTokens: 700,
-    messages: [
-      {
-        role: 'system',
-        content: '你是长篇角色扮演档案员。只依据提供的滚动摘要与最近楼层，概括目标楼层。玩家 user 的原话必须准确记录，并附带楼层顺序，不得用角色回复稀释或改写玩家意图。同一主题出现后续明确更新时，以更晚楼层作为当前状态；旧决定、拒绝、同意、偏好或边界只保留为当时发生过的历史，不继续当作当前约束，不得把任何单次表态永久化。时间线必须按楼层顺序记录：明确区分已发生、正在发生和计划中的事，不得无故跳时、回溯、换地点或改变人物关系。不得补写剧情。只输出 JSON：{"summary":"80到180字摘要","characters":["人物状态或变化"],"relationships":["人物关系及变化"],"clues":["伏笔或线索"],"timeline":["时间 · 地点 · 已发生事件"]}。没有内容的数组保持为空。',
-      },
-      { role: 'user', content: payloadText(payload) },
-    ],
-  });
-  const parsed = parseJsonEnvelope(raw);
-  const summary = String(parsed.summary ?? '').trim();
-  if (!summary) throw new Error('模型返回的楼层摘要为空。');
+function normalizeFloorSummary(parsed, floor) {
+  const summary = String(parsed?.summary ?? '').trim();
+  if (!summary) return null;
   return {
+    floor,
     summary,
     characters: Array.isArray(parsed.characters) ? parsed.characters.map(String).filter(Boolean).slice(0, 12) : [],
     relationships: Array.isArray(parsed.relationships) ? parsed.relationships.map(String).filter(Boolean).slice(0, 12) : [],
     clues: Array.isArray(parsed.clues) ? parsed.clues.map(String).filter(Boolean).slice(0, 12) : [],
     timeline: Array.isArray(parsed.timeline) ? parsed.timeline.map(String).filter(Boolean).slice(0, 12) : [],
   };
+}
+
+export async function requestFloorSummaries(provider, payload) {
+  const expectedFloors = (Array.isArray(payload?.targetFloors) ? payload.targetFloors : [])
+    .map((item) => Number(item?.floor))
+    .filter((floor) => Number.isInteger(floor) && floor > 0);
+  if (!expectedFloors.length) throw new Error('批量摘要没有可处理的目标楼层。');
+  const raw = await provider({
+    maxTokens: Math.min(6000, Math.max(900, expectedFloors.length * 320)),
+    messages: [
+      {
+        role: 'system',
+        content: `你是长篇角色扮演档案员。一次处理 ${expectedFloors.length} 个目标楼层，每一楼都必须按原楼号分别返回，不得合并或漏楼。只依据提供的滚动摘要与 targetFloors 概括各目标楼层。玩家 user 的原话必须准确记录，并附带楼层顺序，不得用角色回复稀释或改写玩家意图。同一主题出现后续明确更新时，以更晚楼层作为当前状态；旧决定、拒绝、同意、偏好或边界只保留为当时发生过的历史，不继续当作当前约束，不得把任何单次表态永久化。时间线必须按楼层顺序记录：明确区分已发生、正在发生和计划中的事，不得无故跳时、回溯、换地点或改变人物关系。不得补写剧情。只输出 JSON：{"floors":[{"floor":楼号,"summary":"80到180字摘要","characters":["人物状态或变化"],"relationships":["人物关系及变化"],"clues":["伏笔或线索"],"timeline":["时间 · 地点 · 已发生事件"]}]}。floors 必须恰好覆盖 ${expectedFloors.join('、')} 楼；没有内容的数组保持为空。`,
+      },
+      { role: 'user', content: payloadText(payload) },
+    ],
+  });
+  const parsed = parseJsonEnvelope(raw);
+  const rows = Array.isArray(parsed?.floors) ? parsed.floors : [];
+  const expected = new Set(expectedFloors);
+  const results = [];
+  const seen = new Set();
+  for (const row of rows) {
+    const floor = Number(row?.floor);
+    if (!expected.has(floor) || seen.has(floor)) continue;
+    const normalized = normalizeFloorSummary(row, floor);
+    if (!normalized) continue;
+    seen.add(floor);
+    results.push(normalized);
+  }
+  if (!results.length) throw new Error('模型没有返回可用的逐楼摘要。');
+  return results.sort((left, right) => left.floor - right.floor);
+}
+
+export async function requestFloorSummary(provider, payload) {
+  const { recentFloors = [], targetFloor, ...safePayload } = payload ?? {};
+  const floor = Number(targetFloor ?? recentFloors.at(-1)?.floor ?? 1);
+  const target = recentFloors.find((item) => Number(item?.floor) === floor)
+    ?? recentFloors.at(-1);
+  const [result] = await requestFloorSummaries(provider, {
+    ...safePayload,
+    targetFloors: target ? [{ ...target, floor }] : [{ floor, text: '' }],
+  });
+  if (!result) throw new Error('模型返回的楼层摘要为空。');
+  const { floor: ignored, ...summary } = result;
+  return summary;
 }
 
 export async function requestCompression(provider, rollingText, throughFloor) {

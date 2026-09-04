@@ -97,6 +97,77 @@ export function buildPrivacyPayload({
   };
 }
 
+export function buildSummaryBatchPayload({
+  chat,
+  floorIndexes,
+  rollingSummary = '',
+  inputTokenLimit = REMOTE_INPUT_TOKEN_LIMIT,
+}) {
+  const safeChat = Array.isArray(chat) ? chat : [];
+  const indexes = [...new Set((Array.isArray(floorIndexes) ? floorIndexes : [])
+    .map(Number)
+    .filter((index) => Number.isInteger(index) && index >= 0 && index < safeChat.length))]
+    .sort((left, right) => left - right);
+  const totalBudget = Math.max(1000, Math.min(REMOTE_INPUT_TOKEN_LIMIT, Number(inputTokenLimit) || REMOTE_INPUT_TOKEN_LIMIT));
+  const floorSources = indexes.map((floorIndex) => {
+    const message = safeChat[floorIndex];
+    return {
+      floorIndex,
+      message,
+      sourceText: normalizeText(message?.mes),
+      speaker: message?.is_user ? 'player' : truncateToTokenBudget(normalizeText(message?.name) || 'character', 40),
+    };
+  });
+  const emptyPayload = {
+    policy: {
+      batchSummary: true,
+      targetFloorCount: floorSources.length,
+      olderRawFloorsIncluded: false,
+      maxInputTokens: totalBudget,
+      contentTruncated: false,
+    },
+    rollingSummary: '',
+    targetFloors: floorSources.map(({ floorIndex, message, speaker }) => ({
+      floor: floorIndex + 1,
+      speaker,
+      kind: message?.is_system ? 'system' : (message?.is_user ? 'user' : 'assistant'),
+      importance: message?.is_user ? 'player-statement' : 'normal',
+      text: '',
+    })),
+  };
+  const metadataTokens = estimateTokens(JSON.stringify(emptyPayload));
+  const contentBudget = Math.max(100, totalBudget - metadataTokens - 120);
+  const rawBudget = indexes.length ? Math.min(4300, Math.floor(contentBudget * 0.76)) : 0;
+  const perFloorBudget = indexes.length ? Math.max(20, Math.floor(rawBudget / indexes.length)) : 0;
+  let contentTruncated = false;
+  const targetFloors = floorSources.map(({ floorIndex, message, sourceText, speaker }) => {
+    const text = truncateToTokenBudget(sourceText, perFloorBudget);
+    if (text !== sourceText) contentTruncated = true;
+    return {
+      floor: floorIndex + 1,
+      speaker,
+      kind: message?.is_system ? 'system' : (message?.is_user ? 'user' : 'assistant'),
+      importance: message?.is_user ? 'player-statement' : 'normal',
+      text,
+    };
+  });
+  const usedRawTokens = targetFloors.reduce((total, floor) => total + estimateTokens(floor.text), 0);
+  const summarySource = normalizeText(rollingSummary);
+  const safeRollingSummary = truncateToTokenBudget(summarySource, Math.max(0, contentBudget - usedRawTokens));
+  if (safeRollingSummary !== summarySource) contentTruncated = true;
+  return {
+    policy: {
+      batchSummary: true,
+      targetFloorCount: targetFloors.length,
+      olderRawFloorsIncluded: false,
+      maxInputTokens: totalBudget,
+      contentTruncated,
+    },
+    rollingSummary: safeRollingSummary,
+    targetFloors,
+  };
+}
+
 export function estimateTokens(text) {
   const value = normalizeText(text);
   if (!value) return 0;

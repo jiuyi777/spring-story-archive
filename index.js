@@ -46,7 +46,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   rollupTokenLimit: 6000,
   remoteRawFloorLimit: 0,
   expandedFloorCount: 5,
-  backfillBatchSize: 20,
+  backfillBatchSize: 10,
   extraEndpoint: '',
   extraModel: '',
   optionMode: 'guided',
@@ -364,7 +364,7 @@ async function onMessageReceived(messageId) {
 }
 
 function queuePendingSummaries() {
-  for (const floorIndex of [...pendingSummaryFloors].sort((left, right) => left - right)) engine.enqueue(floorIndex);
+  engine.enqueueBatch([...pendingSummaryFloors].sort((left, right) => left - right));
   pendingSummaryFloors.clear();
 }
 

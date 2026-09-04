@@ -47,6 +47,8 @@ test('summary controls use normal document flow and the mobile backfill action s
   assert.match(source, /\[data-action="backfill"\][\s\S]*?white-space:\s*nowrap/);
   assert.match(view, /data-setting="backfillBatchSize"/);
   assert.match(view, /补全下一批/);
+  assert.match(view, /同一批楼层只调用一次摘要 API/);
+  assert.doesNotMatch(view, /value="30"/);
   assert.doesNotMatch(view, /补全全部缺失摘要/);
 });
 
@@ -55,6 +57,7 @@ test('automatic summary never queues all old floors from lifecycle paths', async
   assert.doesNotMatch(source, /queueMissing:\s*getSettings\(\)\.autoSummarize/);
   assert.doesNotMatch(source, /queueMissing:\s*true/);
   assert.match(source, /switchCurrentChat\(\{ queueMissing: false \}\)/);
+  assert.match(source, /engine\.enqueueBatch\(\[\.\.\.pendingSummaryFloors\]/);
 });
 
 test('story options have an explicit master switch and choosing only fills the input', async () => {
@@ -95,7 +98,7 @@ test('summary page exposes a zero-history remote floor mode', async () => {
   const source = await readFile(new URL('../ui/view.js', import.meta.url), 'utf8');
   assert.match(source, /data-setting="remoteRawFloorLimit"/);
   assert.match(source, /<option value="0">不发送历史原文<\/option>/);
-  assert.match(source, /单楼摘要仅发送当前一楼/);
+  assert.match(source, /批量摘要只发送本批楼层/);
   assert.match(source, /约 6500 token 的硬上限/);
 });
 

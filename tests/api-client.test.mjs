@@ -9,6 +9,7 @@ import {
   requestAdvanceDirective,
   requestCompression,
   requestFloorSummary,
+  requestFloorSummaries,
   requestNpcGenerationDecision,
   requestNpcProfile,
   requestPlayerPreferenceProfile,
@@ -118,7 +119,7 @@ test('summary prompts preserve player statements without making old statements p
   const provider = async ({ messages }) => {
     prompts.push(messages[0].content);
     return prompts.length === 1
-      ? JSON.stringify({ summary: '玩家选择留下。', characters: [], relationships: [], clues: [], timeline: [] })
+      ? JSON.stringify({ floors: [{ floor: 1, summary: '玩家选择留下。', characters: [], relationships: [], clues: [], timeline: [] }] })
       : JSON.stringify({ summary: '压缩总摘要。' });
   };
   await requestFloorSummary(provider, { rollingSummary: '', recentFloors: [] });
@@ -128,6 +129,21 @@ test('summary prompts preserve player statements without making old statements p
   assert.match(prompts[1], /不得把任何单次表态永久化/);
   assert.doesNotMatch(prompts.join('\n'), /最高优先级/);
   assert.match(prompts[1], /时间线顺序以楼层编号为准/);
+});
+
+test('batch summary response keeps valid requested floors and ignores duplicates or strangers', async () => {
+  const result = await requestFloorSummaries(async () => JSON.stringify({
+    floors: [
+      { floor: 2, summary: '第二楼' },
+      { floor: 1, summary: '第一楼' },
+      { floor: 2, summary: '重复第二楼' },
+      { floor: 99, summary: '无关楼层' },
+    ],
+  }), {
+    rollingSummary: '',
+    targetFloors: [{ floor: 1, text: '一' }, { floor: 2, text: '二' }],
+  });
+  assert.deepEqual(result.map(({ floor, summary }) => [floor, summary]), [[1, '第一楼'], [2, '第二楼']]);
 });
 
 test('preference, NPC and advance prompts keep player control and continuity', async () => {

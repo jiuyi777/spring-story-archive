@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildPrivacyPayload,
+  buildSummaryBatchPayload,
   estimateTokens,
   RAW_FLOOR_LIMIT,
   REMOTE_INPUT_TOKEN_LIMIT,
@@ -77,4 +78,32 @@ test('privacy payload enforces a hard remote input token budget', () => {
   assert.ok(contentTokens <= REMOTE_INPUT_TOKEN_LIMIT);
   assert.equal(payload.policy.contentTruncated, true);
   assert.equal(payload.policy.maxInputTokens, REMOTE_INPUT_TOKEN_LIMIT);
+});
+
+test('batch summary payload includes only its target floors', () => {
+  const chat = Array.from({ length: 12 }, (_, index) => ({ mes: `PRIVATE_FLOOR_${index + 1}` }));
+  const payload = buildSummaryBatchPayload({
+    chat,
+    floorIndexes: [7, 8, 9],
+    rollingSummary: 'SAFE_ROLLING_SUMMARY',
+  });
+  assert.deepEqual(payload.targetFloors.map((row) => row.floor), [8, 9, 10]);
+  const serialized = JSON.stringify(payload);
+  for (const floor of [1, 2, 3, 4, 5, 6, 7, 11, 12]) {
+    assert.equal(serialized.includes(`PRIVATE_FLOOR_${floor}\"`), false);
+  }
+  for (const floor of [8, 9, 10]) assert.equal(serialized.includes(`PRIVATE_FLOOR_${floor}\"`), true);
+  assert.equal(payload.policy.olderRawFloorsIncluded, false);
+});
+
+test('batch summary payload stays within the 6500 token input ceiling', () => {
+  const huge = '很长的楼层内容'.repeat(4000);
+  const payload = buildSummaryBatchPayload({
+    chat: Array.from({ length: 20 }, () => ({ mes: huge, name: '很长的名字'.repeat(100) })),
+    floorIndexes: Array.from({ length: 20 }, (_, index) => index),
+    rollingSummary: huge,
+  });
+  assert.ok(estimateTokens(JSON.stringify(payload)) <= REMOTE_INPUT_TOKEN_LIMIT);
+  assert.equal(payload.policy.contentTruncated, true);
+  assert.equal(payload.targetFloors.length, 20);
 });

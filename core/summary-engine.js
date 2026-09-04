@@ -1,10 +1,10 @@
 import {
-  buildPrivacyPayload,
+  buildSummaryBatchPayload,
   estimateTokens,
   fingerprintMessage,
   fingerprintSummaries,
 } from './privacy-payload.js';
-import { createProvider, requestCompression, requestFloorSummary } from './api-client.js';
+import { createProvider, requestCompression, requestFloorSummaries } from './api-client.js';
 
 function nowIso() {
   return new Date().toISOString();
@@ -82,6 +82,7 @@ export class SummaryEngine {
     this.queue = [];
     this.running = false;
     this.currentFloor = null;
+    this.currentBatch = [];
     this.idleWaiters = [];
     this.abortController = null;
     this.requestDelayMs = Math.max(0, Number(requestDelayMs) || 0);
@@ -92,6 +93,7 @@ export class SummaryEngine {
     if (this.chatKey === chatKey) return;
     this.chatKey = chatKey;
     this.queue = [];
+    this.currentBatch = [];
     this.abortController?.abort();
     this.abortController = null;
   }
@@ -103,6 +105,7 @@ export class SummaryEngine {
     if (!chatKey) return;
     const existing = await this.storage.listSummaries(chatKey);
     const byFloor = new Map(existing.map((record) => [record.floorIndex, record]));
+    const floorsToQueue = [];
 
     for (let floorIndex = 0; floorIndex < chat.length; floorIndex += 1) {
       const messageFingerprint = fingerprintMessage(chat[floorIndex], floorIndex);
@@ -124,10 +127,10 @@ export class SummaryEngine {
           error: '',
           updatedAt: nowIso(),
         });
-        if (queueMissing) this.enqueue(floorIndex);
-      } else if (current.status === 'processing' && this.currentFloor !== floorIndex) {
+        if (queueMissing) floorsToQueue.push(floorIndex);
+      } else if (current.status === 'processing' && !this.currentBatch.includes(floorIndex)) {
         await this.storage.putSummary({ ...current, ...metadata, status: 'missing', error: '', updatedAt: nowIso() });
-        if (queueMissing) this.enqueue(floorIndex);
+        if (queueMissing) floorsToQueue.push(floorIndex);
       } else if (current.isUser !== metadata.isUser || current.userText !== metadata.userText || current.speakerName !== metadata.speakerName) {
         const rebuildPlayerSummary = metadata.isUser && current.priority !== 'player-statement';
         await this.storage.putSummary({
@@ -144,37 +147,44 @@ export class SummaryEngine {
           } : {}),
           updatedAt: nowIso(),
         });
-        if (queueMissing && (rebuildPlayerSummary || ['missing', 'failed'].includes(current.status))) this.enqueue(floorIndex);
+        if (queueMissing && (rebuildPlayerSummary || ['missing', 'failed'].includes(current.status))) floorsToQueue.push(floorIndex);
       } else if (queueMissing && ['missing', 'failed'].includes(current.status)) {
-        this.enqueue(floorIndex);
+        floorsToQueue.push(floorIndex);
       }
     }
 
     for (const record of existing) {
       if (record.floorIndex >= chat.length) await this.storage.deleteSummary(record.key);
     }
+    if (floorsToQueue.length) this.enqueueBatch(floorsToQueue);
     await this.refreshRollup({ allowCompression: false });
     await this.onChange();
   }
 
   enqueue(floorIndex) {
-    if (!Number.isInteger(floorIndex) || floorIndex < 0 || this.queue.includes(floorIndex) || this.currentFloor === floorIndex) return;
-    this.queue.push(floorIndex);
-    this.queue.sort((left, right) => left - right);
-    void this.processQueue();
+    this.enqueueBatch([floorIndex]);
   }
 
-  async backfill(limit = 20) {
+  enqueueBatch(floorIndexes) {
+    for (const floorIndex of floorIndexes) {
+      if (!Number.isInteger(floorIndex) || floorIndex < 0 || this.queue.includes(floorIndex) || this.currentBatch.includes(floorIndex)) continue;
+      this.queue.push(floorIndex);
+    }
+    this.queue.sort((left, right) => left - right);
+    if (this.queue.length) void this.processQueue();
+  }
+
+  async backfill(limit = 10) {
     if (this.running || this.queue.length) return { busy: true, queuedCount: 0, remainingCount: 0, totalMissing: 0 };
     await this.reconcile({ queueMissing: false });
     const summaries = await this.storage.listSummaries(this.chatKey);
     const missing = summaries
       .filter((record) => ['missing', 'failed'].includes(record.status))
-      .filter((record) => record.floorIndex !== this.currentFloor && !this.queue.includes(record.floorIndex))
+      .filter((record) => !this.currentBatch.includes(record.floorIndex) && !this.queue.includes(record.floorIndex))
       .sort((left, right) => left.floorIndex - right.floorIndex);
-    const batchSize = Math.min(30, Math.max(1, Number(limit) || 20));
+    const batchSize = Math.min(20, Math.max(1, Number(limit) || 10));
     const batch = missing.slice(0, batchSize);
-    for (const record of batch) this.enqueue(record.floorIndex);
+    this.enqueueBatch(batch.map((record) => record.floorIndex));
     return {
       busy: false,
       queuedCount: batch.length,
@@ -212,9 +222,11 @@ export class SummaryEngine {
     this.running = true;
     try {
       while (this.queue.length) {
-        const floorIndex = this.queue.shift();
-        this.currentFloor = floorIndex;
-        const result = await this.summarizeFloor(floorIndex);
+        const batch = this.takeNextRequestBatch();
+        this.currentBatch = batch;
+        this.currentFloor = batch[0] ?? null;
+        const result = await this.summarizeBatch(batch);
+        this.currentBatch = [];
         this.currentFloor = null;
         if (result?.rateLimited) {
           this.queue = [];
@@ -223,10 +235,29 @@ export class SummaryEngine {
         if (this.queue.length && this.requestDelayMs > 0) await this.wait(this.requestDelayMs);
       }
     } finally {
+      this.currentBatch = [];
       this.currentFloor = null;
       this.running = false;
       for (const resolve of this.idleWaiters.splice(0)) resolve();
     }
+  }
+
+  takeNextRequestBatch() {
+    const context = this.getContext();
+    const maxFloors = Math.min(20, Math.max(1, Number(this.getSettings().backfillBatchSize) || 10));
+    const rawTokenBudget = 4300;
+    const batch = [];
+    let usedTokens = 0;
+    while (this.queue.length && batch.length < maxFloors) {
+      const floorIndex = this.queue[0];
+      const messageTokens = estimateTokens(context.chat?.[floorIndex]?.mes ?? '');
+      if (batch.length && usedTokens + Math.min(messageTokens, rawTokenBudget) > rawTokenBudget) break;
+      this.queue.shift();
+      batch.push(floorIndex);
+      usedTokens += Math.min(messageTokens, rawTokenBudget);
+      if (usedTokens >= rawTokenBudget) break;
+    }
+    return batch;
   }
 
   makeProvider(source) {
@@ -241,80 +272,106 @@ export class SummaryEngine {
   }
 
   async summarizeFloor(floorIndex) {
+    return this.summarizeBatch([floorIndex]);
+  }
+
+  async summarizeBatch(floorIndexes) {
     const context = this.getContext();
     const chatKey = this.chatKey;
-    const message = context.chat?.[floorIndex];
-    if (!message || !chatKey) return;
+    const batch = floorIndexes
+      .filter((floorIndex) => Number.isInteger(floorIndex) && context.chat?.[floorIndex])
+      .sort((left, right) => left - right);
+    if (!batch.length || !chatKey) return { skipped: true };
     const settings = this.getSettings();
-    const key = summaryKey(chatKey, floorIndex);
-    const messageFingerprint = fingerprintMessage(message, floorIndex);
-    const metadata = messageMetadata(message);
-    await this.storage.putSummary({
-      key,
-      chatKey,
-      floorIndex,
-      messageFingerprint,
-      ...metadata,
-      status: 'processing',
-      summary: '',
-      characters: [],
-      relationships: [],
-      clues: [],
-      timeline: [],
-      error: '',
-      updatedAt: nowIso(),
+    const records = batch.map((floorIndex) => {
+      const message = context.chat[floorIndex];
+      return {
+        key: summaryKey(chatKey, floorIndex),
+        chatKey,
+        floorIndex,
+        messageFingerprint: fingerprintMessage(message, floorIndex),
+        ...messageMetadata(message),
+      };
     });
-    await this.onChange();
-
-    try {
-      const rollup = await this.storage.getRollup(chatKey);
-      const payload = buildPrivacyPayload({
-        chat: context.chat,
-        targetFloorIndex: floorIndex,
-        rollingSummary: rollup?.text ?? '',
-        rawFloorLimit: settings.remoteRawFloorLimit,
-        includeTargetFloor: true,
-      });
-      const result = await requestFloorSummary(this.makeProvider(settings.summarySource), payload);
-      const latest = this.getContext().chat?.[floorIndex];
-      if (!latest || this.chatKey !== chatKey) return { skipped: true };
-      if (fingerprintMessage(latest, floorIndex) !== messageFingerprint) {
-        if (!this.queue.includes(floorIndex)) this.queue.push(floorIndex);
-        return { skipped: true };
-      }
+    for (const record of records) {
       await this.storage.putSummary({
-        key,
-        chatKey,
-        floorIndex,
-        messageFingerprint,
-        ...metadata,
-        status: 'ready',
-        ...result,
-        error: '',
-        updatedAt: nowIso(),
-      });
-      await this.refreshRollup({ allowCompression: true });
-      await this.onChange();
-      return { ready: true };
-    } catch (error) {
-      if (this.chatKey !== chatKey) return { skipped: true };
-      await this.storage.putSummary({
-        key,
-        chatKey,
-        floorIndex,
-        messageFingerprint,
-        ...metadata,
-        status: 'failed',
+        ...record,
+        status: 'processing',
         summary: '',
         characters: [],
         relationships: [],
         clues: [],
         timeline: [],
-        error: errorText(error),
+        error: '',
         updatedAt: nowIso(),
       });
+    }
+    await this.onChange();
+
+    try {
+      const rollup = await this.storage.getRollup(chatKey);
+      const payload = buildSummaryBatchPayload({
+        chat: context.chat,
+        floorIndexes: batch,
+        rollingSummary: rollup?.text ?? '',
+      });
+      const results = await requestFloorSummaries(this.makeProvider(settings.summarySource), payload);
+      const byFloor = new Map(results.map((result) => [result.floor - 1, result]));
+      if (this.chatKey !== chatKey) return { skipped: true };
+      let readyCount = 0;
+      for (const record of records) {
+        const latest = this.getContext().chat?.[record.floorIndex];
+        if (!latest) continue;
+        if (fingerprintMessage(latest, record.floorIndex) !== record.messageFingerprint) {
+          if (!this.queue.includes(record.floorIndex)) this.queue.push(record.floorIndex);
+          this.queue.sort((left, right) => left - right);
+          continue;
+        }
+        const result = byFloor.get(record.floorIndex);
+        if (!result) {
+          await this.storage.putSummary({
+            ...record,
+            status: 'failed',
+            summary: '',
+            characters: [],
+            relationships: [],
+            clues: [],
+            timeline: [],
+            error: '模型漏掉了这一楼，请重新生成。',
+            updatedAt: nowIso(),
+          });
+          continue;
+        }
+        const { floor: ignored, ...summary } = result;
+        await this.storage.putSummary({
+          ...record,
+          status: 'ready',
+          ...summary,
+          error: '',
+          updatedAt: nowIso(),
+        });
+        readyCount += 1;
+      }
+      await this.refreshRollup({ allowCompression: true });
       await this.onChange();
-      return { failed: true, rateLimited: isRateLimitError(error) };
+      return { ready: readyCount > 0, readyCount };
+    } catch (error) {
+      if (this.chatKey !== chatKey) return { skipped: true };
+      for (const record of records) {
+        await this.storage.putSummary({
+          ...record,
+          status: 'failed',
+          summary: '',
+          characters: [],
+          relationships: [],
+          clues: [],
+          timeline: [],
+          error: errorText(error),
+          updatedAt: nowIso(),
+        });
+      }
+      await this.onChange();
+      return { failed: true, failedCount: records.length, rateLimited: isRateLimitError(error) };
     }
   }
 
