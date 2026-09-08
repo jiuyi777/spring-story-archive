@@ -4,7 +4,7 @@ import {
   PREFERENCE_QUIZ_SOURCE,
   PREFERENCE_TRAIT_LABELS,
   STORY_EXPERIENCE_OPTIONS,
-} from '../core/preference-quiz.js?v=0.5.5';
+} from '../core/preference-quiz.js?v=0.5.6';
 
 const MODE_NAMES = {
   guided: '玩家行动（代入）',
@@ -12,6 +12,11 @@ const MODE_NAMES = {
   third: '第三人称叙事',
   mixed: '混合表达',
 };
+
+const LAUNCHER_POSITION_KEY = 'spring-story-archive:launcher-position';
+const LAUNCHER_VIEWPORT_MARGIN = 6;
+const LAUNCHER_DRAG_THRESHOLD = 4;
+const LAUNCHER_DOCK_OVERSHOOT = 8;
 const EXPERIENCE_NAMES = Object.fromEntries(STORY_EXPERIENCE_OPTIONS.map((option) => [option.id, option.label]));
 
 function switchControlMarkup(setting, label) {
@@ -60,7 +65,7 @@ export function createArchiveShell() {
   root.innerHTML = `
     <button class="ssa-launcher" type="button" data-action="open" aria-label="打开春序档案">
       <span class="ssa-launcher-flower" aria-hidden="true">✿</span>
-      <span>春序</span>
+      <span class="ssa-launcher-label">春序</span>
     </button>
     <div class="ssa-backdrop" data-action="close" hidden></div>
     <section class="ssa-app" role="dialog" aria-modal="true" aria-label="春序档案" hidden>
@@ -406,7 +411,179 @@ export function createArchiveShell() {
     </section>
   `;
   document.body.append(root);
+  bindLauncherSwipe(root);
   return root;
+}
+
+export function isRightSwipeGesture(start, end, minDistance = 18) {
+  const deltaX = Number(end?.x) - Number(start?.x);
+  const deltaY = Math.abs(Number(end?.y) - Number(start?.y));
+  return deltaX >= minDistance && deltaX > deltaY * 1.35;
+}
+
+export function clampLauncherPosition(position, viewport, launcherSize, margin = LAUNCHER_VIEWPORT_MARGIN) {
+  const safeMargin = Math.max(0, Number(margin) || 0);
+  const maxLeft = Math.max(safeMargin, Number(viewport?.width) - Number(launcherSize?.width) - safeMargin);
+  const maxTop = Math.max(safeMargin, Number(viewport?.height) - Number(launcherSize?.height) - safeMargin);
+  const left = Math.min(maxLeft, Math.max(safeMargin, Number(position?.left) || 0));
+  const top = Math.min(maxTop, Math.max(safeMargin, Number(position?.top) || 0));
+  return { left, top, maxLeft, maxTop };
+}
+
+export function isLauncherDockGesture(start, end, rawLeft, maxLeft, overshoot = LAUNCHER_DOCK_OVERSHOOT) {
+  return isRightSwipeGesture(start, end)
+    && Number(rawLeft) >= Number(maxLeft) + Math.max(0, Number(overshoot) || 0);
+}
+
+function readLauncherPosition() {
+  try {
+    const value = JSON.parse(localStorage.getItem(LAUNCHER_POSITION_KEY) ?? 'null');
+    if (!Number.isFinite(value?.left) || !Number.isFinite(value?.top)) return null;
+    return { left: value.left, top: value.top };
+  } catch {
+    return null;
+  }
+}
+
+function saveLauncherPosition(position) {
+  try {
+    localStorage.setItem(LAUNCHER_POSITION_KEY, JSON.stringify({ left: position.left, top: position.top }));
+  } catch {}
+}
+
+function measureLauncher(launcher) {
+  const rect = launcher.getBoundingClientRect();
+  return {
+    rect,
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    size: { width: rect.width, height: rect.height },
+  };
+}
+
+function applyLauncherPosition(launcher, position) {
+  launcher.style.left = `${position.left}px`;
+  launcher.style.top = `${position.top}px`;
+  launcher.style.right = 'auto';
+  launcher.style.bottom = 'auto';
+}
+
+function bindLauncherSwipe(root) {
+  const launcher = root.querySelector('.ssa-launcher');
+  const savedPosition = readLauncherPosition();
+  if (savedPosition) {
+    const { viewport, size } = measureLauncher(launcher);
+    const position = clampLauncherPosition(savedPosition, viewport, size);
+    applyLauncherPosition(launcher, position);
+    saveLauncherPosition(position);
+  }
+
+  let gesture = null;
+  let pendingPosition = null;
+  let animationFrame = 0;
+  let suppressClick = false;
+
+  const renderPendingPosition = () => {
+    animationFrame = 0;
+    if (!pendingPosition) return;
+    applyLauncherPosition(launcher, pendingPosition);
+    pendingPosition = null;
+  };
+
+  const queuePosition = (position) => {
+    pendingPosition = position;
+    if (!animationFrame) animationFrame = window.requestAnimationFrame(renderPendingPosition);
+  };
+
+  const finishGesture = (event, cancelled = false) => {
+    if (!gesture || event.pointerId !== gesture.pointerId) return;
+    launcher.releasePointerCapture?.(event.pointerId);
+    if (animationFrame) {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = 0;
+    }
+    renderPendingPosition();
+
+    const finished = gesture;
+    gesture = null;
+    launcher.classList.remove('is-dragging');
+    if (!finished.dragging) return;
+
+    suppressClick = true;
+    window.setTimeout(() => { suppressClick = false; }, 350);
+    const position = clampLauncherPosition(
+      { left: finished.rawLeft, top: finished.rawTop },
+      finished.viewport,
+      finished.size,
+    );
+    applyLauncherPosition(launcher, position);
+    saveLauncherPosition(position);
+
+    if (!cancelled && isLauncherDockGesture(
+      { x: finished.startX, y: finished.startY },
+      { x: finished.lastX, y: finished.lastY },
+      finished.rawLeft,
+      position.maxLeft,
+    )) {
+      setLauncherDocked(root, true);
+    }
+  };
+
+  launcher.addEventListener('pointerdown', (event) => {
+    if (event.isPrimary === false || (Number.isInteger(event.button) && event.button !== 0)) return;
+    if (root.classList.contains('is-launcher-docked')) return;
+    const { rect, viewport, size } = measureLauncher(launcher);
+    gesture = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      rawLeft: rect.left,
+      rawTop: rect.top,
+      viewport,
+      size,
+      dragging: false,
+    };
+    launcher.setPointerCapture?.(event.pointerId);
+  });
+  launcher.addEventListener('pointermove', (event) => {
+    if (!gesture || event.pointerId !== gesture.pointerId) return;
+    gesture.lastX = event.clientX;
+    gesture.lastY = event.clientY;
+    if (!gesture.dragging && Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) < LAUNCHER_DRAG_THRESHOLD) return;
+    gesture.dragging = true;
+    launcher.classList.add('is-dragging');
+    gesture.rawLeft = event.clientX - gesture.offsetX;
+    gesture.rawTop = event.clientY - gesture.offsetY;
+    queuePosition(clampLauncherPosition(
+      { left: gesture.rawLeft, top: gesture.rawTop },
+      gesture.viewport,
+      gesture.size,
+    ));
+  });
+  launcher.addEventListener('pointerup', (event) => finishGesture(event));
+  launcher.addEventListener('pointercancel', (event) => finishGesture(event, true));
+  launcher.addEventListener('click', (event) => {
+    if (suppressClick) {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressClick = false;
+      return;
+    }
+    if (root.classList.contains('is-launcher-docked')) {
+      event.preventDefault();
+      event.stopPropagation();
+      setLauncherDocked(root, false);
+    }
+  }, true);
+}
+
+export function setLauncherDocked(root, docked) {
+  const launcher = root.querySelector('.ssa-launcher');
+  root.classList.toggle('is-launcher-docked', docked);
+  launcher.setAttribute('aria-label', docked ? '显示春序悬浮球' : '打开春序档案');
 }
 
 function makeFactGroup(title, items) {
@@ -883,6 +1060,7 @@ export function syncSettings(root, settings, apiKey = '') {
 }
 
 export function setOpen(root, open) {
+  if (open) setLauncherDocked(root, false);
   root.querySelector('.ssa-app').hidden = !open;
   root.querySelector('.ssa-backdrop').hidden = !open;
   root.classList.toggle('is-open', open);

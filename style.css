@@ -43,27 +43,51 @@
   z-index: 2990;
   right: 20px;
   bottom: 82px;
-  display: inline-flex;
+  display: grid;
   align-items: center;
-  gap: 8px;
-  min-height: 46px;
-  padding: 0 17px 0 10px;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
   border: 1px solid rgba(59, 88, 75, .34);
-  border-radius: 24px;
+  border-radius: 50%;
   background: rgba(250, 247, 237, .94);
   box-shadow: 0 10px 30px rgba(31, 58, 46, .22);
   cursor: pointer;
   backdrop-filter: blur(14px);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform .22s ease, opacity .18s ease;
+}
+
+.ssa-launcher.is-dragging {
+  cursor: grabbing;
+  transition: none;
+}
+
+#spring_story_archive_root.is-open .ssa-launcher {
+  display: none;
+}
+
+#spring_story_archive_root.is-launcher-docked .ssa-launcher {
+  opacity: .68;
+  transform: translateX(calc(100% - 10px));
 }
 
 .ssa-launcher-flower {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 27px;
+  height: 27px;
   place-items: center;
   border-radius: 50%;
   color: var(--ssa-paper-light);
   background: var(--ssa-jade);
+}
+
+.ssa-launcher-label {
+  display: none;
 }
 
 .ssa-backdrop {
@@ -1568,8 +1592,17 @@
 
 @media (max-width: 720px) {
   .ssa-launcher {
-    right: 12px;
-    bottom: 72px;
+    right: 8px;
+    bottom: 68px;
+    width: 34px;
+    height: 34px;
+    min-height: 34px;
+  }
+
+  .ssa-launcher-flower {
+    width: 24px;
+    height: 24px;
+    font-size: 13px;
   }
 
   .ssa-app {
@@ -1877,6 +1910,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ssa-app,
+  .ssa-launcher,
   .ssa-primary-button,
   .ssa-secondary-button,
   .ssa-option-card,

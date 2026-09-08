@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { isFloorExpandedByDefault } from '../ui/view.js';
+import {
+  clampLauncherPosition,
+  isFloorExpandedByDefault,
+  isLauncherDockGesture,
+  isRightSwipeGesture,
+} from '../ui/view.js';
 
 test('the latest five floors expand by default and older floors stay folded', () => {
   assert.deepEqual(
@@ -140,4 +145,40 @@ test('mobile archive uses continuous floor rows, a solid single-line nav, and a 
   assert.match(style, /\.ssa-tabs button \{[\s\S]*?font-family:\s*var\(--ssa-kai-font\);[\s\S]*?white-space:\s*nowrap;/);
   assert.match(style, /--ssa-kai-font:[^;]*"KaiTi"/);
   assert.match(style, /\.ssa-floor-list \{[\s\S]*?rgba\(59, 88, 75, \.08\)/);
+});
+
+test('the smaller launcher ball can dock with a right swipe and restore from its visible edge', async () => {
+  const [view, index, style] = await Promise.all([
+    readFile(new URL('../ui/view.js', import.meta.url), 'utf8'),
+    readFile(new URL('../index.js', import.meta.url), 'utf8'),
+    readFile(new URL('../style.css', import.meta.url), 'utf8'),
+  ]);
+  assert.equal(isRightSwipeGesture({ x: 20, y: 100 }, { x: 105, y: 108 }), true);
+  assert.equal(isRightSwipeGesture({ x: 20, y: 100 }, { x: 42, y: 102 }), true);
+  assert.equal(isRightSwipeGesture({ x: 20, y: 100 }, { x: 40, y: 210 }), false);
+  assert.match(view, /class="ssa-launcher-label">春序/);
+  assert.doesNotMatch(view, /data-action="restore-panel"/);
+  assert.match(view, /addEventListener\('pointerdown'/);
+  assert.match(view, /addEventListener\('pointermove'/);
+  assert.match(view, /spring-story-archive:launcher-position/);
+  assert.doesNotMatch(index, /setPanelDocked/);
+  assert.match(style, /#spring_story_archive_root\.is-launcher-docked \.ssa-launcher/);
+  assert.match(style, /\.ssa-launcher \{[\s\S]*?touch-action:\s*none;/);
+  assert.match(style, /@media \(max-width: 720px\)[\s\S]*?\.ssa-launcher \{[\s\S]*?width:\s*34px;/);
+  assert.match(style, /@media \(max-width: 720px\)[\s\S]*?\.ssa-app \{[\s\S]*?width:\s*100vw;/);
+  assert.match(style, /@media \(max-width: 720px\)[\s\S]*?\.ssa-tabs \{[\s\S]*?position:\s*fixed;/);
+});
+
+test('launcher dragging stays on screen and only docks after pushing beyond the right edge', () => {
+  assert.deepEqual(
+    clampLauncherPosition({ left: -40, top: 900 }, { width: 390, height: 844 }, { width: 34, height: 34 }),
+    { left: 6, top: 804, maxLeft: 350, maxTop: 804 },
+  );
+  assert.deepEqual(
+    clampLauncherPosition({ left: 120, top: 220 }, { width: 390, height: 844 }, { width: 34, height: 34 }),
+    { left: 120, top: 220, maxLeft: 350, maxTop: 804 },
+  );
+  assert.equal(isLauncherDockGesture({ x: 260, y: 700 }, { x: 388, y: 704 }, 371, 350), true);
+  assert.equal(isLauncherDockGesture({ x: 260, y: 700 }, { x: 350, y: 704 }, 350, 350), false);
+  assert.equal(isLauncherDockGesture({ x: 260, y: 700 }, { x: 388, y: 820 }, 371, 350), false);
 });
