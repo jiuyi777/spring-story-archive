@@ -1,6 +1,7 @@
 import {
   estimateTokens,
   REMOTE_INPUT_TOKEN_LIMIT,
+  splitInputText,
   truncateToTokenBudget,
 } from './privacy-payload.js';
 
@@ -101,7 +102,10 @@ export function createProvider({ source, context, extra, signal }) {
         .filter((message) => message.role !== 'system')
         .map((message) => `${message.role === 'assistant' ? 'assistant' : 'user'}:\n${String(message.content ?? '')}`)
         .join('\n\n');
-      return context.generateRaw({ prompt, systemPrompt, responseLength: maxTokens, trimNames: false });
+      signal?.throwIfAborted();
+      const result = await context.generateRaw({ prompt, systemPrompt, responseLength: maxTokens, trimNames: false });
+      signal?.throwIfAborted();
+      return result;
     }
     if (source === 'extra') {
       return callOpenAiCompatible({ ...extra, messages, maxTokens, signal });
@@ -137,6 +141,8 @@ function normalizeFloorSummary(parsed, floor) {
 }
 
 export async function requestFloorSummaries(provider, payload) {
+  const input = JSON.stringify(payload, null, 2);
+  if (estimateTokens(input) > REMOTE_INPUT_TOKEN_LIMIT) throw new Error('逐楼摘要输入超过完整读取预算，需要分批或分段。');
   const expectedFloors = (Array.isArray(payload?.targetFloors) ? payload.targetFloors : [])
     .map((item) => Number(item?.floor))
     .filter((floor) => Number.isInteger(floor) && floor > 0);
@@ -148,7 +154,7 @@ export async function requestFloorSummaries(provider, payload) {
         role: 'system',
         content: `你是长篇角色扮演档案员。一次处理 ${expectedFloors.length} 个目标楼层，每一楼都必须按原楼号分别返回，不得合并或漏楼。只依据提供的滚动摘要与 targetFloors 概括各目标楼层。玩家 user 的原话必须准确记录，并附带楼层顺序，不得用角色回复稀释或改写玩家意图。同一主题出现后续明确更新时，以更晚楼层作为当前状态；旧决定、拒绝、同意、偏好或边界只保留为当时发生过的历史，不继续当作当前约束，不得把任何单次表态永久化。时间线必须按楼层顺序记录：明确区分已发生、正在发生和计划中的事，不得无故跳时、回溯、换地点或改变人物关系。不得补写剧情。只输出 JSON：{"floors":[{"floor":楼号,"summary":"80到180字摘要","characters":["人物状态或变化"],"relationships":["人物关系及变化"],"clues":["伏笔或线索"],"timeline":["时间 · 地点 · 已发生事件"]}]}。floors 必须恰好覆盖 ${expectedFloors.join('、')} 楼；没有内容的数组保持为空。`,
       },
-      { role: 'user', content: payloadText(payload) },
+      { role: 'user', content: input },
     ],
   });
   const parsed = parseJsonEnvelope(raw);
@@ -183,6 +189,21 @@ export async function requestFloorSummary(provider, payload) {
 }
 
 export async function requestCompression(provider, rollingText, throughFloor) {
+  const serialize = (text) => JSON.stringify({ throughFloor, rollingSummary: text, rawFloors: [] }, null, 2);
+  let text = rollingText;
+  for (let round = 0; round < 4; round += 1) {
+    const parts = splitInputText(text, serialize, REMOTE_INPUT_TOKEN_LIMIT - 300);
+    if (parts.length <= 1) return requestCompressionPart(provider, text, throughFloor);
+    const results = [];
+    for (const part of parts) results.push(await requestCompressionPart(provider, part, throughFloor));
+    const next = results.map((result, index) => `【按时间顺序的分段档案 ${index + 1}】\n${JSON.stringify(result)}`).join('\n\n');
+    if (estimateTokens(next) >= estimateTokens(text)) throw new Error('分段压缩没有缩短档案，已保留原摘要，请调整模型后重试。');
+    text = next;
+  }
+  throw new Error('总摘要仍超过完整读取预算，已保留逐楼摘要。');
+}
+
+async function requestCompressionPart(provider, rollingText, throughFloor) {
   const raw = await provider({
     maxTokens: 1200,
     messages: [
@@ -190,7 +211,7 @@ export async function requestCompression(provider, rollingText, throughFloor) {
         role: 'system',
         content: '你是长篇剧情总档案员。把给出的既有档案压缩为一份可供后续续写使用的总档案。玩家原话必须准确保留并附带楼层顺序。同一主题出现后续明确更新时，以更晚楼层作为当前状态；旧决定、拒绝、同意、偏好或边界只保留为当时发生过的历史，不继续当作当前约束，不得把任何单次表态永久化。时间线顺序以楼层编号为准，不得改变事件先后、地点、已知人物关系或事件状态。可以合并重复信息，不得添加原档案中不存在的信息。只输出 JSON：{"summary":"压缩后的总摘要","timeline":["按时间顺序保留的事件锚点"],"characters":["人物当前状态"],"relationships":["已确认的人物关系"],"clues":["未解决线索"],"continuityRules":["后续续写不得违反的已知事实"]}。',
       },
-      { role: 'user', content: payloadText({ throughFloor, rollingSummary: rollingText, rawFloors: [] }) },
+      { role: 'user', content: JSON.stringify({ throughFloor, rollingSummary: rollingText, rawFloors: [] }, null, 2) },
     ],
   });
   const parsed = parseJsonEnvelope(raw);

@@ -23,6 +23,33 @@ export function fingerprintMessage(message, floorIndex) {
   return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
+export function validSummaries(records, chat) {
+  return (records ?? []).filter((record) => record.status === 'ready' && record.summary?.trim()
+    && chat?.[record.floorIndex]
+    && record.messageFingerprint === fingerprintMessage(chat[record.floorIndex], record.floorIndex))
+    .sort((a, b) => a.floorIndex - b.floorIndex);
+}
+
+// Each part fits its actual serialized request. Joining the parts recovers every character.
+export function splitInputText(text, serialize, limit = REMOTE_INPUT_TOKEN_LIMIT) {
+  const parts = [];
+  let remaining = String(text ?? '');
+  while (remaining) {
+    let low = 0;
+    let high = remaining.length;
+    while (low < high) {
+      const end = Math.ceil((low + high) / 2);
+      if (estimateTokens(serialize(remaining.slice(0, end))) <= limit) low = end;
+      else high = end - 1;
+    }
+    if (low < remaining.length && /[\uD800-\uDBFF]/.test(remaining[low - 1])) low -= 1;
+    if (!low) throw new Error('请求元数据超过输入预算，无法完整读取正文。');
+    parts.push(remaining.slice(0, low));
+    remaining = remaining.slice(low);
+  }
+  return parts;
+}
+
 function safeRawFloorLimit(value) {
   const numeric = Math.floor(Number(value));
   return Number.isFinite(numeric) ? Math.max(0, Math.min(RAW_FLOOR_LIMIT, numeric)) : DEFAULT_RAW_FLOOR_LIMIT;
@@ -138,24 +165,22 @@ export function buildSummaryBatchPayload({
   const metadataTokens = estimateTokens(JSON.stringify(emptyPayload));
   const contentBudget = Math.max(100, totalBudget - metadataTokens - 120);
   const rawBudget = indexes.length ? Math.min(4300, Math.floor(contentBudget * 0.76)) : 0;
-  const perFloorBudget = indexes.length ? Math.max(20, Math.floor(rawBudget / indexes.length)) : 0;
   let contentTruncated = false;
   const targetFloors = floorSources.map(({ floorIndex, message, sourceText, speaker }) => {
-    const text = truncateToTokenBudget(sourceText, perFloorBudget);
-    if (text !== sourceText) contentTruncated = true;
     return {
       floor: floorIndex + 1,
       speaker,
       kind: message?.is_system ? 'system' : (message?.is_user ? 'user' : 'assistant'),
       importance: message?.is_user ? 'player-statement' : 'normal',
-      text,
+      text: sourceText,
     };
   });
   const usedRawTokens = targetFloors.reduce((total, floor) => total + estimateTokens(floor.text), 0);
+  if (usedRawTokens > rawBudget) throw new Error('目标楼层超过单批预算，需要分批或分段完整读取。');
   const summarySource = normalizeText(rollingSummary);
   const safeRollingSummary = truncateToTokenBudget(summarySource, Math.max(0, contentBudget - usedRawTokens));
   if (safeRollingSummary !== summarySource) contentTruncated = true;
-  return {
+  const payload = {
     policy: {
       batchSummary: true,
       targetFloorCount: targetFloors.length,
@@ -166,6 +191,13 @@ export function buildSummaryBatchPayload({
     rollingSummary: safeRollingSummary,
     targetFloors,
   };
+  // Pretty-printing and escaped characters count too. Only supporting history may be shortened.
+  while (estimateTokens(JSON.stringify(payload, null, 2)) > totalBudget && payload.rollingSummary) {
+    payload.rollingSummary = truncateToTokenBudget(payload.rollingSummary, Math.max(0, estimateTokens(payload.rollingSummary) - 200));
+    payload.policy.contentTruncated = true;
+  }
+  if (estimateTokens(JSON.stringify(payload, null, 2)) > totalBudget) throw new Error('目标楼层超过单批预算，需要分批或分段完整读取。');
+  return payload;
 }
 
 export function estimateTokens(text) {
@@ -182,6 +214,7 @@ export function fingerprintSummaries(records) {
       floorIndex: record.floorIndex,
       messageFingerprint: record.messageFingerprint,
       priority: record.priority,
+      inputComplete: record.inputComplete === true,
       summary: normalizeText(record.summary),
       timeline: Array.isArray(record.timeline) ? record.timeline.map(normalizeText) : [],
       characters: Array.isArray(record.characters) ? record.characters.map(normalizeText) : [],

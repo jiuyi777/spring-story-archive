@@ -3,6 +3,8 @@ import {
   estimateTokens,
   fingerprintMessage,
   fingerprintSummaries,
+  validSummaries,
+  splitInputText,
 } from './privacy-payload.js';
 import { createProvider, requestCompression, requestFloorSummaries } from './api-client.js';
 
@@ -40,7 +42,7 @@ function formatFactLine(label, items) {
   return items?.length ? `\n${label}：${items.join('；')}` : '';
 }
 
-function formatCheckpoint(checkpoint) {
+export function formatCheckpoint(checkpoint) {
   if (!checkpoint?.summary) return '';
   return [
     `【压缩总摘要】${checkpoint.summary}`,
@@ -52,7 +54,7 @@ function formatCheckpoint(checkpoint) {
   ].join('').trim();
 }
 
-function formatFloorRecord(record) {
+export function formatFloorRecord(record) {
   const type = record.isUser ? '玩家原文记录' : '角色回复';
   return [
     `【${type}】第 ${record.floorIndex + 1} 楼：${record.summary}`,
@@ -79,6 +81,7 @@ export class SummaryEngine {
     this.getExtraCredentials = getExtraCredentials;
     this.onChange = onChange;
     this.chatKey = '';
+    this.chatRevision = 0;
     this.queue = [];
     this.running = false;
     this.currentFloor = null;
@@ -92,6 +95,7 @@ export class SummaryEngine {
   setChat(chatKey) {
     if (this.chatKey === chatKey) return;
     this.chatKey = chatKey;
+    this.chatRevision += 1;
     this.queue = [];
     this.currentBatch = [];
     this.abortController?.abort();
@@ -102,12 +106,14 @@ export class SummaryEngine {
     const context = this.getContext();
     const chat = Array.isArray(context.chat) ? context.chat : [];
     const chatKey = this.chatKey;
+    const revision = this.chatRevision;
     if (!chatKey) return;
     const existing = await this.storage.listSummaries(chatKey);
     const byFloor = new Map(existing.map((record) => [record.floorIndex, record]));
     const floorsToQueue = [];
 
     for (let floorIndex = 0; floorIndex < chat.length; floorIndex += 1) {
+      if (revision !== this.chatRevision) return;
       const messageFingerprint = fingerprintMessage(chat[floorIndex], floorIndex);
       const metadata = messageMetadata(chat[floorIndex]);
       const current = byFloor.get(floorIndex);
@@ -154,8 +160,10 @@ export class SummaryEngine {
     }
 
     for (const record of existing) {
+      if (revision !== this.chatRevision) return;
       if (record.floorIndex >= chat.length) await this.storage.deleteSummary(record.key);
     }
+    if (revision !== this.chatRevision) return;
     if (floorsToQueue.length) this.enqueueBatch(floorsToQueue);
     await this.refreshRollup({ allowCompression: false });
     await this.onChange();
@@ -176,10 +184,12 @@ export class SummaryEngine {
 
   async backfill(limit = 10) {
     if (this.running || this.queue.length) return { busy: true, queuedCount: 0, remainingCount: 0, totalMissing: 0 };
+    const revision = this.chatRevision;
     await this.reconcile({ queueMissing: false });
     const summaries = await this.storage.listSummaries(this.chatKey);
+    if (revision !== this.chatRevision) return { busy: false, queuedCount: 0, remainingCount: 0, totalMissing: 0 };
     const missing = summaries
-      .filter((record) => ['missing', 'failed'].includes(record.status))
+      .filter((record) => ['missing', 'failed'].includes(record.status) || (record.status === 'ready' && record.inputComplete !== true))
       .filter((record) => !this.currentBatch.includes(record.floorIndex) && !this.queue.includes(record.floorIndex))
       .sort((left, right) => left.floorIndex - right.floorIndex);
     const batchSize = Math.min(20, Math.max(1, Number(limit) || 10));
@@ -194,6 +204,7 @@ export class SummaryEngine {
   }
 
   async regenerate(floorIndex) {
+    const revision = this.chatRevision;
     const context = this.getContext();
     const message = context.chat?.[floorIndex];
     if (!message) throw new Error('这个楼层已经不存在。');
@@ -213,6 +224,7 @@ export class SummaryEngine {
       error: '',
       updatedAt: nowIso(),
     });
+    if (revision !== this.chatRevision) return;
     this.enqueue(floorIndex);
     await this.onChange();
   }
@@ -252,6 +264,10 @@ export class SummaryEngine {
       const floorIndex = this.queue[0];
       const messageTokens = estimateTokens(context.chat?.[floorIndex]?.mes ?? '');
       if (batch.length && usedTokens + Math.min(messageTokens, rawTokenBudget) > rawTokenBudget) break;
+      if (batch.length) {
+        try { buildSummaryBatchPayload({ chat: context.chat, floorIndexes: [...batch, floorIndex] }); }
+        catch { break; }
+      }
       this.queue.shift();
       batch.push(floorIndex);
       usedTokens += Math.min(messageTokens, rawTokenBudget);
@@ -277,14 +293,17 @@ export class SummaryEngine {
 
   async summarizeBatch(floorIndexes) {
     const context = this.getContext();
+    const chat = context.chat.map((message) => ({ ...message }));
     const chatKey = this.chatKey;
+    const revision = this.chatRevision;
+    const isCurrent = () => this.chatRevision === revision;
     const batch = floorIndexes
-      .filter((floorIndex) => Number.isInteger(floorIndex) && context.chat?.[floorIndex])
+      .filter((floorIndex) => Number.isInteger(floorIndex) && chat[floorIndex])
       .sort((left, right) => left - right);
     if (!batch.length || !chatKey) return { skipped: true };
     const settings = this.getSettings();
     const records = batch.map((floorIndex) => {
-      const message = context.chat[floorIndex];
+      const message = chat[floorIndex];
       return {
         key: summaryKey(chatKey, floorIndex),
         chatKey,
@@ -294,6 +313,7 @@ export class SummaryEngine {
       };
     });
     for (const record of records) {
+      if (!isCurrent()) return { skipped: true };
       await this.storage.putSummary({
         ...record,
         status: 'processing',
@@ -309,17 +329,15 @@ export class SummaryEngine {
     await this.onChange();
 
     try {
-      const rollup = await this.storage.getRollup(chatKey);
-      const payload = buildSummaryBatchPayload({
-        chat: context.chat,
-        floorIndexes: batch,
-        rollingSummary: rollup?.text ?? '',
-      });
-      const results = await requestFloorSummaries(this.makeProvider(settings.summarySource), payload);
+      const rollup = await this.refreshRollup({ allowCompression: false });
+      if (!isCurrent()) return { skipped: true };
+      const provider = this.makeProvider(settings.summarySource);
+      const results = await this.requestCompleteSummaries(provider, chat, batch, rollup?.text ?? '', isCurrent);
       const byFloor = new Map(results.map((result) => [result.floor - 1, result]));
-      if (this.chatKey !== chatKey) return { skipped: true };
+      if (!isCurrent()) return { skipped: true };
       let readyCount = 0;
       for (const record of records) {
+        if (!isCurrent()) return { skipped: true };
         const latest = this.getContext().chat?.[record.floorIndex];
         if (!latest) continue;
         if (fingerprintMessage(latest, record.floorIndex) !== record.messageFingerprint) {
@@ -346,17 +364,19 @@ export class SummaryEngine {
         await this.storage.putSummary({
           ...record,
           status: 'ready',
+          inputComplete: true,
           ...summary,
           error: '',
           updatedAt: nowIso(),
         });
         readyCount += 1;
       }
-      await this.refreshRollup({ allowCompression: true });
+      if (!isCurrent()) return { skipped: true };
+      const rollupResult = await this.refreshRollup({ allowCompression: true });
       await this.onChange();
-      return { ready: readyCount > 0, readyCount };
+      return { ready: readyCount > 0, readyCount, rateLimited: rollupResult?.rateLimited };
     } catch (error) {
-      if (this.chatKey !== chatKey) return { skipped: true };
+      if (!isCurrent()) return { skipped: true };
       for (const record of records) {
         await this.storage.putSummary({
           ...record,
@@ -375,19 +395,47 @@ export class SummaryEngine {
     }
   }
 
+  async requestCompleteSummaries(provider, chat, batch, rollingSummary, isCurrent) {
+    const makePayload = (inputChat, indexes) => buildSummaryBatchPayload({ chat: inputChat, floorIndexes: indexes, rollingSummary });
+    let payload;
+    try { payload = makePayload(chat, batch); } catch { /* Full oversized floors are read in parts below. */ }
+    if (payload) return requestFloorSummaries(provider, payload);
+    const results = [];
+    for (const floorIndex of batch) {
+      const text = String(chat[floorIndex].mes ?? '');
+      const parts = splitInputText(text, (part) => JSON.stringify({ text: part }), 3500);
+      const summaries = [];
+      const segments = parts.length ? parts : [''];
+      for (const [partIndex, part] of segments.entries()) {
+        if (!isCurrent()) throw new Error('聊天已切换，本次摘要已停止。');
+        const inputChat = [...chat];
+        inputChat[floorIndex] = { ...chat[floorIndex], mes: part };
+        const payload = buildSummaryBatchPayload({ chat: inputChat, floorIndexes: [floorIndex], rollingSummary, inputTokenLimit: 6200 });
+        Object.assign(payload.targetFloors[0], { part: partIndex + 1, parts: segments.length });
+        const [summary] = await requestFloorSummaries(provider, payload);
+        summaries.push(summary);
+      }
+      results.push({
+        floor: floorIndex + 1,
+        summary: summaries.map((item) => item.summary).join('\n'),
+        ...Object.fromEntries(['timeline', 'characters', 'relationships', 'clues'].map((field) => [field, summaries.flatMap((item) => item[field])])),
+      });
+    }
+    return results;
+  }
+
   async refreshRollup({ allowCompression = true, forceCompression = false } = {}) {
     const chatKey = this.chatKey;
+    const revision = this.chatRevision;
     if (!chatKey) return null;
     const settings = this.getSettings();
-    const ready = (await this.storage.listSummaries(chatKey))
-      .filter((record) => record.status === 'ready')
-      .sort((left, right) => left.floorIndex - right.floorIndex);
+    const ready = validSummaries(await this.storage.listSummaries(chatKey), this.getContext().chat);
     const checkpoints = (await this.storage.listCheckpoints(chatKey))
       .filter((checkpoint) => checkpoint.status === 'ready')
       .sort((left, right) => right.throughFloor - left.throughFloor);
     const validCheckpoint = checkpoints.find((checkpoint) => {
       const source = ready.filter((record) => record.floorIndex <= checkpoint.throughFloor);
-      return checkpoint.formatVersion === 4 && checkpoint.sourceFingerprint === fingerprintSummaries(source);
+      return checkpoint.formatVersion === 5 && checkpoint.sourceFingerprint === fingerprintSummaries(source);
     });
     const afterCheckpoint = validCheckpoint
       ? ready.filter((record) => record.floorIndex > validCheckpoint.throughFloor)
@@ -409,7 +457,9 @@ export class SummaryEngine {
       error: '',
       updatedAt: nowIso(),
     };
+    if (revision !== this.chatRevision) return null;
     await this.storage.putRollup(rollup);
+    if (revision !== this.chatRevision) return null;
 
     const reachesHundred = throughFloor >= 0 && (throughFloor + 1) % 100 === 0 && validCheckpoint?.throughFloor !== throughFloor;
     const reachesTokenLimit = tokenEstimate >= Number(settings.rollupTokenLimit || 6000) && validCheckpoint?.throughFloor !== throughFloor;
@@ -424,13 +474,17 @@ export class SummaryEngine {
   }
 
   async compressRollup(rollup, ready) {
+    const chatKey = rollup.chatKey;
+    const revision = this.chatRevision;
+    const isCurrent = () => this.chatKey === chatKey && this.chatRevision === revision;
+    if (!isCurrent()) return null;
     const settings = this.getSettings();
     const throughFloor = rollup.throughFloor;
-    const key = checkpointKey(this.chatKey, throughFloor);
+    const key = checkpointKey(chatKey, throughFloor);
     const source = ready.filter((record) => record.floorIndex <= throughFloor);
     await this.storage.putCheckpoint({
       key,
-      chatKey: this.chatKey,
+      chatKey,
       throughFloor,
       status: 'processing',
       summary: '',
@@ -440,29 +494,35 @@ export class SummaryEngine {
       clues: [],
       continuityRules: [],
       sourceFingerprint: fingerprintSummaries(source),
-      formatVersion: 4,
+      formatVersion: 5,
       error: '',
       updatedAt: nowIso(),
     });
     await this.onChange();
     try {
+      if (!isCurrent()) return null;
       const compressed = await requestCompression(this.makeProvider(settings.summarySource), rollup.text, throughFloor + 1);
+      if (!isCurrent()) return null;
+      const latest = validSummaries(await this.storage.listSummaries(chatKey), this.getContext().chat)
+        .filter((record) => record.floorIndex <= throughFloor);
+      if (!isCurrent() || fingerprintSummaries(latest) !== fingerprintSummaries(source)) return null;
       await this.storage.putCheckpoint({
         key,
-        chatKey: this.chatKey,
+        chatKey,
         throughFloor,
         status: 'ready',
         ...compressed,
         sourceFingerprint: fingerprintSummaries(source),
-        formatVersion: 4,
+        formatVersion: 5,
         error: '',
         updatedAt: nowIso(),
       });
-      return this.refreshRollup({ allowCompression: false });
+      return isCurrent() ? this.refreshRollup({ allowCompression: false }) : null;
     } catch (error) {
+      if (!isCurrent()) return null;
       await this.storage.putCheckpoint({
         key,
-        chatKey: this.chatKey,
+        chatKey,
         throughFloor,
         status: 'failed',
         summary: '',
@@ -472,13 +532,13 @@ export class SummaryEngine {
         clues: [],
         continuityRules: [],
         sourceFingerprint: fingerprintSummaries(source),
-        formatVersion: 4,
+        formatVersion: 5,
         error: errorText(error),
         updatedAt: nowIso(),
       });
       await this.storage.putRollup({ ...rollup, status: 'failed', error: errorText(error), updatedAt: nowIso() });
       await this.onChange();
-      return rollup;
+      return { ...rollup, status: 'failed', error: errorText(error), rateLimited: isRateLimitError(error) };
     }
   }
 
@@ -502,6 +562,7 @@ export class SummaryEngine {
   }
 
   destroy() {
+    this.chatRevision += 1;
     this.queue = [];
     for (const resolve of this.idleWaiters.splice(0)) resolve();
     this.abortController?.abort();

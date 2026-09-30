@@ -1,4 +1,4 @@
-import { buildPrivacyPayload, fingerprintMessage } from './core/privacy-payload.js';
+import { buildPrivacyPayload, fingerprintMessage, validSummaries } from './core/privacy-payload.js';
 import {
   callOpenAiCompatible,
   createProvider,
@@ -13,6 +13,7 @@ import { isPreferenceQuizComplete, scorePreferenceQuiz, STORY_EXPERIENCE_OPTIONS
 import { openArchiveStorage } from './core/storage.js';
 import { SummaryEngine } from './core/summary-engine.js';
 import { SemanticRecallService } from './core/semantic-recall.js';
+import { createStoryRequest, injectStoryContext, STORY_PROMPT_ID } from './core/story-context.js';
 import {
   createArchiveShell,
   collectNpcEdits,
@@ -42,6 +43,8 @@ const RECALL_INTERCEPTOR = 'springStoryArchiveSemanticRecallInterceptor';
 const RECALL_PROMPT_ID = `${MODULE_ID}:semantic-recall`;
 const DEFAULT_SETTINGS = Object.freeze({
   autoSummarize: true,
+  summaryContextEnabled: true,
+  filterArchivedFloors: true,
   summarySource: 'current',
   rollupTokenLimit: 6000,
   remoteRawFloorLimit: 0,
@@ -77,6 +80,8 @@ let recallService = null;
 let subscriptions = [];
 let reconcileTimer = 0;
 let autoAdvanceRemaining = 0;
+let advanceEpoch = 0;
+let storyRequest = null;
 let advancing = false;
 let focusLatestOnNextRender = false;
 let latestReadySignature = '';
@@ -177,6 +182,41 @@ function clearRecallPrompt(context = null) {
   } catch {}
 }
 
+function clearStoryPrompt() {
+  const previous = storyRequest;
+  storyRequest = null;
+  previous?.cancel();
+  getContext().setExtensionPrompt?.(STORY_PROMPT_ID, '', 1, 0, false, 0);
+}
+
+function finishStoryRequest() {
+  storyRequest?.finish();
+  storyRequest = null;
+  clearStoryPrompt();
+  clearRecallPrompt();
+}
+
+function onFinalPrompt(data, dryRun) {
+  storyRequest?.verify(data, dryRun);
+}
+
+function captureChatTask() {
+  const owner = engine;
+  const chatKey = currentChatKey();
+  const revision = owner.chatRevision;
+  const signature = getContext().chat.map(fingerprintMessage).join('|');
+  return {
+    chatKey,
+    isCurrent: () => engine === owner && owner.chatKey === chatKey && owner.chatRevision === revision
+      && currentChatKey() === chatKey && getContext().chat.map(fingerprintMessage).join('|') === signature,
+  };
+}
+
+function showStoryContextStatus(text) {
+  const status = root?.querySelector('[data-role="story-context-status"]');
+  if (status) status.textContent = text;
+}
+
 function currentChatKey(context = getContext()) {
   const runtimeId = context.getCurrentChatId?.() ?? context.chatId;
   if (runtimeId !== undefined && runtimeId !== null && String(runtimeId).trim()) return String(runtimeId);
@@ -205,6 +245,7 @@ async function refreshView() {
     chatKey ? engine.storage.getProfile(profileKey(chatKey, 'advance-state')) : null,
     chatKey ? engine.storage.listNpcs(chatKey) : [],
   ]);
+  if (!root || !engine || engine.chatKey !== chatKey) return;
   const latest = snapshot.summaries.at(-1);
   const readySignature = latest?.status === 'ready'
     ? `${chatKey}:${latest.floorIndex}:${latest.messageFingerprint}:${latest.updatedAt}`
@@ -229,7 +270,9 @@ async function refreshView() {
 
 async function switchCurrentChat({ queueMissing = false } = {}) {
   const chatKey = currentChatKey();
-  if (engine.chatKey !== chatKey) {
+  const changed = engine.chatKey !== chatKey;
+  engine.setChat(chatKey);
+  if (changed) {
     latestReadySignature = '';
     recallState = {
       indexedCount: 0,
@@ -238,8 +281,9 @@ async function switchCurrentChat({ queueMissing = false } = {}) {
       phase: getSettings().semanticRecallEnabled ? 'armed' : 'disabled',
     };
     clearRecallPrompt();
+    clearStoryPrompt();
+    showStoryContextStatus('等待下次回复前读取当前聊天的剧情总摘要');
   }
-  engine.setChat(chatKey);
   if (!chatKey) {
     setStatus(root, '请先打开一个聊天', 'warning');
     await refreshView();
@@ -249,17 +293,19 @@ async function switchCurrentChat({ queueMissing = false } = {}) {
   setStatus(root, '本地档案已同步');
 }
 
-async function recallForCurrentContext({ force = false, phase = 'matched' } = {}) {
+async function recallForCurrentContext({ force = false, phase = 'matched', type } = {}) {
   const settings = getSettings();
   if (!settings.semanticRecallEnabled || !engine?.chatKey || !recallService) {
     return { indexedCount: 0, records: [], prompt: '' };
   }
   const context = getContext();
-  const targetFloorIndex = context.chat.length - 1;
+  const task = captureChatTask();
+  const targetFloorIndex = context.chat.length - (type === 'swipe' ? 2 : 1);
   if (targetFloorIndex < 0) return { indexedCount: 0, records: [], prompt: '' };
   const snapshot = await engine.getSnapshot();
+  if (!task.isCurrent()) return { indexedCount: 0, records: [], prompt: '' };
   const result = await recallService.recall({
-    chatKey: engine.chatKey,
+    chatKey: task.chatKey,
     summaries: snapshot.summaries,
     chat: context.chat,
     targetFloorIndex,
@@ -268,6 +314,7 @@ async function recallForCurrentContext({ force = false, phase = 'matched' } = {}
     recentRawFloorLimit: settings.remoteRawFloorLimit,
     force,
   });
+  if (!task.isCurrent()) return { indexedCount: 0, records: [], prompt: '' };
   recallState = {
     indexedCount: result.indexedCount,
     recalledFloors: result.records.map((record) => record.floorIndex),
@@ -291,7 +338,52 @@ async function addSemanticRecall(payload) {
 }
 
 async function semanticRecallInterceptor(chat, contextSize, abort, type) {
+  finishStoryRequest();
+  const original = [...chat];
+  const chatKey = currentChatKey();
+  const signature = getContext().chat.map(fingerprintMessage).join('|');
+  const { summaryContextEnabled, filterArchivedFloors } = getSettings();
+  const isCurrent = () => currentChatKey() === chatKey && getContext().chat.map(fingerprintMessage).join('|') === signature
+    && getSettings().summaryContextEnabled === summaryContextEnabled && getSettings().filterArchivedFloors === filterArchivedFloors;
+  const request = createStoryRequest({ context: getContext(), promptChat: chat, abort, isCurrent, onStatus: showStoryContextStatus });
+  storyRequest = request;
+  try {
+    await prepareArchivePrompt(chat, contextSize, abort, type, request);
+    const context = getContext();
+    context.eventSource?.makeLast?.((context.eventTypes ?? context.event_types)?.GENERATE_AFTER_DATA, onFinalPrompt);
+  } finally {
+    const settings = getSettings();
+    if (currentChatKey() !== chatKey || getContext().chat.map(fingerprintMessage).join('|') !== signature
+      || settings.summaryContextEnabled !== summaryContextEnabled || settings.filterArchivedFloors !== filterArchivedFloors) {
+      chat.splice(0, chat.length, ...original);
+      clearStoryPrompt();
+      clearRecallPrompt();
+      showStoryContextStatus('聊天或设置已变化，本轮已停止；请重新发送');
+      abort(true);
+    }
+  }
+}
+
+async function prepareArchivePrompt(chat, contextSize, abort, type, request) {
   const context = getContext();
+  const chatKey = currentChatKey(context);
+  try {
+    const settings = getSettings();
+    const canGuard = typeof context.stopGeneration === 'function'
+      && Boolean((context.eventTypes ?? context.event_types)?.GENERATE_AFTER_DATA);
+    const status = await injectStoryContext({
+      context, storage: engine.storage, chatKey, promptChat: chat, contextSize, type,
+      enabled: settings.summaryContextEnabled,
+      filter: settings.filterArchivedFloors && canGuard,
+      onPlan: (plan) => { if (canGuard) request.plan(plan); },
+      isCurrent: () => currentChatKey() === chatKey && getSettings().summaryContextEnabled
+        && getSettings().filterArchivedFloors === settings.filterArchivedFloors,
+    });
+    showStoryContextStatus(status);
+  } catch (error) {
+    finishStoryRequest();
+    showStoryContextStatus(`总摘要读取失败，保留原文：${error.message}`);
+  }
   if (!getSettings().semanticRecallEnabled || !engine?.chatKey || type === 'quiet') {
     clearRecallPrompt(context);
     recallState = { ...recallState, recalledFloors: [], error: '', phase: getSettings().semanticRecallEnabled ? 'armed' : 'disabled' };
@@ -302,7 +394,17 @@ async function semanticRecallInterceptor(chat, contextSize, abort, type) {
     if (typeof context.setExtensionPrompt !== 'function') throw new Error('当前酒馆版本不支持生成前注入。');
     recallState = { ...recallState, recalledFloors: [], error: '', phase: 'preparing' };
     renderRecallState(root, recallState);
-    const result = await recallForCurrentContext({ phase: 'preparing' });
+    const result = await recallForCurrentContext({ phase: 'preparing', type });
+    if (currentChatKey() !== chatKey) {
+      clearStoryPrompt();
+      clearRecallPrompt(context);
+      abort(true);
+      return;
+    }
+    if (!getSettings().semanticRecallEnabled) {
+      clearRecallPrompt(context);
+      return;
+    }
     context.setExtensionPrompt?.(
       RECALL_PROMPT_ID,
       result.prompt,
@@ -369,12 +471,15 @@ function queuePendingSummaries() {
 }
 
 function onGenerationEnded() {
+  finishStoryRequest();
   queuePendingSummaries();
   window.clearTimeout(postGenerationTimer);
   postGenerationTimer = window.setTimeout(() => void runPostGenerationTasks(), 120);
 }
 
 function onGenerationStopped() {
+  advanceEpoch += 1;
+  finishStoryRequest();
   autoAdvanceRemaining = 0;
   window.clearTimeout(postGenerationTimer);
   queuePendingSummaries();
@@ -385,10 +490,11 @@ async function runPostGenerationTasks() {
   if (autoAdvanceRemaining > 0 && !advancing) await runAutoAdvance();
 }
 
-async function applyNpcStateUpdates(existingNpcs, updates) {
+async function applyNpcStateUpdates(existingNpcs, updates, isCurrent) {
   const byId = new Map(existingNpcs.map((npc) => [npc.id, npc]));
   let changed = 0;
   for (const update of updates ?? []) {
+    if (!isCurrent()) break;
     const existing = byId.get(update.id);
     if (!existing) continue;
     await engine.storage.putNpc({
@@ -408,6 +514,8 @@ async function runAutoNpcCheck() {
   const settings = getSettings();
   if (!settings.autoNpcEnabled || npcCheckRunning || !engine.chatKey) return;
   const context = getContext();
+  const task = captureChatTask();
+  const isCurrent = () => task.isCurrent() && getSettings().autoNpcEnabled;
   const startingChatKey = engine.chatKey;
   const targetFloorIndex = context.chat.length - 1;
   const latestMessage = context.chat[targetFloorIndex];
@@ -415,6 +523,7 @@ async function runAutoNpcCheck() {
   const messageFingerprint = fingerprintMessage(latestMessage, targetFloorIndex);
   const stateKey = profileKey(engine.chatKey, 'auto-npc-state');
   const previousState = await engine.storage.getProfile(stateKey);
+  if (!isCurrent()) return;
   if (previousState?.messageFingerprint === messageFingerprint) return;
   npcCheckRunning = true;
   try {
@@ -443,22 +552,23 @@ async function runAutoNpcCheck() {
       existingNpcs: existingNpcs.slice(-8),
       brief: settings.npcBrief,
     });
-    if (engine.chatKey !== startingChatKey || fingerprintMessage(getContext().chat?.[targetFloorIndex], targetFloorIndex) !== messageFingerprint) return;
+    if (!isCurrent()) return;
     await engine.storage.putProfile({
       key: stateKey,
-      chatKey: engine.chatKey,
+      chatKey: task.chatKey,
       kind: 'auto-npc-state',
       messageFingerprint,
       needed: decision.needed,
       reason: decision.reason,
       updatedAt: new Date().toISOString(),
     });
-    const updatedNpcCount = await applyNpcStateUpdates(existingNpcs, decision.updates);
+    const updatedNpcCount = await applyNpcStateUpdates(existingNpcs, decision.updates, isCurrent);
+    if (!isCurrent()) return;
     if (decision.needed && decision.npc) {
       const createdAt = new Date().toISOString();
       await engine.storage.putNpc({
-        id: `${engine.chatKey}::npc::${createdAt}::${Math.random().toString(36).slice(2, 8)}`,
-        chatKey: engine.chatKey,
+        id: `${task.chatKey}::npc::${createdAt}::${Math.random().toString(36).slice(2, 8)}`,
+        chatKey: task.chatKey,
         ...decision.npc,
         generatedAutomatically: true,
         createdAt,
@@ -482,7 +592,11 @@ async function runAutoAdvance() {
   const settings = getSettings();
   if (!settings.autoAdvanceEnabled || autoAdvanceRemaining <= 0 || advancing) return;
   const context = getContext();
+  const task = captureChatTask();
+  const epoch = advanceEpoch;
+  const isCurrent = () => task.isCurrent() && epoch === advanceEpoch && getSettings().autoAdvanceEnabled && autoAdvanceRemaining > 0;
   const playerProfile = await getPlayerPreferenceProfile();
+  if (!isCurrent()) return;
   if (!playerProfile?.summary) {
     settings.autoAdvanceEnabled = false;
     autoAdvanceRemaining = 0;
@@ -504,13 +618,11 @@ async function runAutoAdvance() {
   }
   const targetFloorIndex = context.chat.length - 1;
   if (targetFloorIndex < 0 || context.chat[targetFloorIndex]?.is_user) return;
-  const startingChatKey = engine.chatKey;
-  const startingChatLength = context.chat.length;
   advancing = true;
   try {
     setStatus(root, `正在规划自动推进 · 剩余 ${autoAdvanceRemaining} 轮`);
     await engine.waitForIdle();
-    if (engine.chatKey !== startingChatKey || getContext().chat.length !== startingChatLength) return;
+    if (!isCurrent()) return;
     if (String(textarea?.value ?? '').trim()) {
       autoAdvanceRemaining = 0;
       setStatus(root, '检测到未发送草稿，自动推进已停止', 'warning');
@@ -529,21 +641,23 @@ async function runAutoAdvance() {
       extra: getExtraCredentials(),
     });
     const npcProfiles = (await engine.storage.listNpcs(engine.chatKey)).slice(-6);
+    if (!isCurrent()) return;
     const directive = await requestAdvanceDirective(provider, payload, { playerProfile, npcProfiles });
-    if (engine.chatKey !== startingChatKey || getContext().chat.length !== startingChatLength) return;
+    if (!isCurrent()) return;
     if (String(textarea?.value ?? '').trim()) {
       autoAdvanceRemaining = 0;
       setStatus(root, '检测到未发送草稿，自动推进已停止', 'warning');
       return;
     }
     await engine.storage.putProfile({
-      key: profileKey(engine.chatKey, 'advance-state'),
-      chatKey: engine.chatKey,
+      key: profileKey(task.chatKey, 'advance-state'),
+      chatKey: task.chatKey,
       kind: 'advance-state',
       ...directive,
       updatedAt: new Date().toISOString(),
     });
     await refreshView();
+    if (!isCurrent() || String(textarea?.value ?? '').trim()) return;
     autoAdvanceRemaining -= 1;
     await context.generate('normal', {
       automatic_trigger: true,
@@ -645,9 +759,11 @@ async function analyzePreferences({ skipQuiz = false } = {}) {
 async function generateNpc() {
   const settings = getSettings();
   const context = getContext();
+  const task = captureChatTask();
   if (!context.chat.length) throw new Error('当前聊天还没有可用的剧情档案。');
   setStatus(root, '正在生成 NPC……');
   if (settings.npcSource === 'current') await engine.waitForIdle();
+  if (!task.isCurrent()) return;
   const [rollup, playerProfile, existingNpcs] = await Promise.all([
     engine.storage.getRollup(engine.chatKey),
     getPlayerPreferenceProfile(),
@@ -664,15 +780,17 @@ async function generateNpc() {
     context,
     extra: getExtraCredentials(),
   });
+  if (!task.isCurrent()) return;
   const npc = await requestNpcProfile(provider, payload, {
     brief: settings.npcBrief,
     playerProfile,
     existingNpcs: existingNpcs.slice(-8),
   });
+  if (!task.isCurrent()) return;
   const createdAt = new Date().toISOString();
   await engine.storage.putNpc({
-    id: `${engine.chatKey}::npc::${createdAt}::${Math.random().toString(36).slice(2, 8)}`,
-    chatKey: engine.chatKey,
+    id: `${task.chatKey}::npc::${createdAt}::${Math.random().toString(36).slice(2, 8)}`,
+    chatKey: task.chatKey,
     ...npc,
     createdAt,
   });
@@ -776,8 +894,9 @@ async function handleAction(action, button) {
   }
   if (action === 'compress') {
     setStatus(root, '正在进行大总结……');
-    await engine.compressNow();
-    setStatus(root, '大总结已更新');
+    const task = captureChatTask();
+    const result = await engine.compressNow();
+    if (task.isCurrent()) setStatus(root, result?.status === 'ready' && !result.rateLimited ? '大总结已更新' : '大总结未更新，已保留逐楼摘要，请查看错误状态');
     return;
   }
   if (action === 'generate-options') return generateOptions();
@@ -808,8 +927,11 @@ async function handleAction(action, button) {
   if (action === 'rebuild-recall') {
     if (!getSettings().semanticRecallEnabled) throw new Error('请先开启“自动找回相关往事”。');
     setStatus(root, '正在重建语义索引……');
+    const task = captureChatTask();
     const snapshot = await engine.getSnapshot();
-    const vectors = await recallService.rebuild(engine.chatKey, snapshot.summaries);
+    if (!task.isCurrent()) return;
+    const vectors = await recallService.rebuild(task.chatKey, validSummaries(snapshot.summaries, getContext().chat));
+    if (!task.isCurrent()) return;
     recallState = { indexedCount: vectors.length, recalledFloors: [], error: '', phase: 'indexed' };
     renderRecallState(root, recallState);
     setStatus(root, `语义索引已重建，共 ${vectors.length} 楼`);
@@ -836,7 +958,14 @@ async function handleSettingChange(input) {
       return;
     }
   }
-  if (key === 'autoAdvanceEnabled' && !settings.autoAdvanceEnabled) autoAdvanceRemaining = 0;
+  if (key === 'autoAdvanceEnabled' && !settings.autoAdvanceEnabled) {
+    advanceEpoch += 1;
+    autoAdvanceRemaining = 0;
+  }
+  if (key === 'summaryContextEnabled' || key === 'filterArchivedFloors') {
+    clearStoryPrompt();
+    showStoryContextStatus(settings.summaryContextEnabled ? '设置已更新，下次回复前读取总摘要' : '总摘要发送已关闭，保留聊天原文');
+  }
   if (key === 'semanticRecallEnabled') {
     if (settings.semanticRecallEnabled && typeof getContext().setExtensionPrompt !== 'function') {
       settings.semanticRecallEnabled = false;
@@ -894,26 +1023,32 @@ function bindUi() {
 }
 
 function bindHostEvents() {
+  subscribe('GENERATE_AFTER_DATA', onFinalPrompt);
   subscribe('MESSAGE_SENT', onMessageSent);
   subscribe('MESSAGE_RECEIVED', onMessageReceived);
   subscribe('GENERATION_ENDED', onGenerationEnded);
   subscribe('GENERATION_STOPPED', onGenerationStopped);
   subscribe('MESSAGE_EDITED', (messageId) => {
+    clearStoryPrompt();
     requestLatestSummaryFocus();
     scheduleReconcile({ queueMissing: false });
-    if (getSettings().autoSummarize) window.setTimeout(() => engine.enqueue(messageIndexFromEvent(messageId)), 100);
+    const task = captureChatTask();
+    if (getSettings().autoSummarize) window.setTimeout(() => { if (task.isCurrent()) engine.enqueue(messageIndexFromEvent(messageId)); }, 100);
   });
   subscribe('MESSAGE_SWIPED', (messageId) => {
+    clearStoryPrompt();
     requestLatestSummaryFocus();
     scheduleReconcile({ queueMissing: false });
-    if (getSettings().autoSummarize) window.setTimeout(() => engine.enqueue(messageIndexFromEvent(messageId)), 100);
+    const task = captureChatTask();
+    if (getSettings().autoSummarize) window.setTimeout(() => { if (task.isCurrent()) engine.enqueue(messageIndexFromEvent(messageId)); }, 100);
   });
   subscribe('MESSAGE_DELETED', () => scheduleReconcile({ queueMissing: false }));
   subscribe('CHAT_CHANGED', () => {
+    advanceEpoch += 1;
     autoAdvanceRemaining = 0;
     pendingSummaryFloors.clear();
     requestLatestSummaryFocus();
-    scheduleReconcile({ queueMissing: false });
+    void switchCurrentChat({ queueMissing: false }).catch((error) => setStatus(root, error.message, 'error'));
   });
 }
 
@@ -952,6 +1087,7 @@ async function initialize() {
 }
 
 function cleanup() {
+  advanceEpoch += 1;
   window.clearTimeout(reconcileTimer);
   window.clearTimeout(modelFetchTimer);
   window.clearTimeout(postGenerationTimer);
@@ -961,6 +1097,7 @@ function cleanup() {
   } catch {}
   subscriptions = [];
   engine?.destroy();
+  clearStoryPrompt();
   clearRecallPrompt();
   if (globalThis[RECALL_INTERCEPTOR] === semanticRecallInterceptor) delete globalThis[RECALL_INTERCEPTOR];
   root?.remove();

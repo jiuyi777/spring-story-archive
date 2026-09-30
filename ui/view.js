@@ -4,7 +4,7 @@ import {
   PREFERENCE_QUIZ_SOURCE,
   PREFERENCE_TRAIT_LABELS,
   STORY_EXPERIENCE_OPTIONS,
-} from '../core/preference-quiz.js?v=0.5.6';
+} from '../core/preference-quiz.js?v=0.5.7';
 
 const MODE_NAMES = {
   guided: '玩家行动（代入）',
@@ -94,6 +94,18 @@ export function createArchiveShell() {
 
       <main class="ssa-main">
         <section class="ssa-page is-active" data-page="summary">
+          <article class="ssa-summary-controls-card">
+            <h2>让 AI 读取剧情总摘要</h2>
+            <label class="ssa-switch-row">
+              <span class="ssa-switch-copy"><strong>每次回复前发送总摘要</strong><small>自动读取当前聊天档案，正常聊天即可使用；无需开启语义回忆。</small></span>
+              ${switchControlMarkup('summaryContextEnabled', '每次回复前发送总摘要')}
+            </label>
+            <label class="ssa-switch-row">
+              <span class="ssa-switch-copy"><strong>过滤已摘要的旧楼层原文</strong><small>保留最近 5 楼；更早且已被本轮摘要覆盖的原文只在发送时过滤，本地聊天记录完整保留。</small></span>
+              ${switchControlMarkup('filterArchivedFloors', '过滤已摘要的旧楼层原文')}
+            </label>
+            <p class="ssa-muted" data-role="story-context-status" role="status">等待下次回复前读取剧情总摘要</p>
+          </article>
           <article class="ssa-summary-controls-card">
             <div>
               <p class="ssa-kicker">自动整理</p>
@@ -614,7 +626,7 @@ function makeFloorCard(record, expanded) {
   header.append(title);
   const badge = document.createElement('span');
   badge.className = 'ssa-state-badge';
-  badge.textContent = record.status === 'ready' ? '已摘要' : record.status === 'processing' ? '处理中' : record.status === 'failed' ? '失败' : '缺失';
+  badge.textContent = record.status === 'ready' ? (record.inputComplete === true ? '已摘要' : '待核对覆盖') : record.status === 'processing' ? '处理中' : record.status === 'failed' ? '失败' : '缺失';
   const disclosure = document.createElement('span');
   disclosure.className = 'ssa-floor-disclosure';
   disclosure.setAttribute('aria-hidden', 'true');
@@ -700,7 +712,7 @@ export function renderSnapshot(root, snapshot, { expandedFloorCount = 5, resetDi
   root.querySelector('[data-role="rollup-text"]').textContent = rollup?.text || '还没有可用摘要。';
   root.querySelector('[data-role="rollup-floor"]').textContent = `已摘要 ${rollup?.readyFloors ?? 0} / ${snapshot.totalFloors ?? snapshot.summaries.length} 楼`;
   root.querySelector('[data-role="rollup-token"]').textContent = `约 ${rollup?.tokenEstimate ?? 0} token`;
-  const missingCount = snapshot.summaries.filter((record) => ['missing', 'failed'].includes(record.status)).length;
+  const missingCount = snapshot.summaries.filter((record) => ['missing', 'failed'].includes(record.status) || (record.status === 'ready' && record.inputComplete !== true)).length;
   const backfillStatus = root.querySelector('[data-role="backfill-status"]');
   if (backfillStatus) backfillStatus.textContent = `待补全 ${missingCount} 楼`;
 }

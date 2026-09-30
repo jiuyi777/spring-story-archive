@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SummaryEngine } from '../core/summary-engine.js';
+import { fingerprintMessage } from '../core/privacy-payload.js';
 import { createMemoryStorage } from '../core/storage.js';
 
 function makeHarness({ chat, generateRaw, settings = {}, requestDelayMs = 0, wait }) {
@@ -225,7 +226,7 @@ test('a 429 stops the current batch and leaves later floors pending', async () =
 
 test('the 100th summarized floor creates a compression checkpoint', async () => {
   let compressionCalls = 0;
-  const { engine, storage } = makeHarness({
+  const { engine, storage, context } = makeHarness({
     chat: Array.from({ length: 100 }, (_, index) => ({ mes: `原文${index + 1}` })),
     settings: { rollupTokenLimit: 30000 },
     generateRaw: async ({ systemPrompt }) => {
@@ -241,7 +242,7 @@ test('the 100th summarized floor creates a compression checkpoint', async () => 
       key: `chat-a::floor::${floorIndex}`,
       chatKey: 'chat-a',
       floorIndex,
-      messageFingerprint: `fp-${floorIndex}`,
+      inputComplete: true, messageFingerprint: fingerprintMessage(context.chat[floorIndex], floorIndex),
       status: 'ready',
       summary: `第${floorIndex + 1}楼摘要`,
       characters: [], relationships: [], clues: [], timeline: [], error: '', updatedAt: new Date().toISOString(),
@@ -254,12 +255,12 @@ test('the 100th summarized floor creates a compression checkpoint', async () => 
   assert.equal(snapshot.checkpoints[0].status, 'ready');
   assert.match(snapshot.rollup.text, /一百楼压缩总摘要/);
   assert.match(snapshot.rollup.text, /固定时间线.*第1至100楼/s);
-  assert.equal(snapshot.checkpoints[0].formatVersion, 4);
+  assert.equal(snapshot.checkpoints[0].formatVersion, 5);
 });
 
 test('the configured token ceiling also creates a compression checkpoint', async () => {
   let compressionCalls = 0;
-  const { engine, storage } = makeHarness({
+  const { engine, storage, context } = makeHarness({
     chat: [{ mes: '一' }, { mes: '二' }],
     settings: { rollupTokenLimit: 10 },
     generateRaw: async ({ systemPrompt }) => {
@@ -271,7 +272,7 @@ test('the configured token ceiling also creates a compression checkpoint', async
   for (let floorIndex = 0; floorIndex < 2; floorIndex += 1) {
     await storage.putSummary({
       key: `chat-a::floor::${floorIndex}`,
-      chatKey: 'chat-a', floorIndex, messageFingerprint: `fp-${floorIndex}`,
+      chatKey: 'chat-a', floorIndex, inputComplete: true, messageFingerprint: fingerprintMessage(context.chat[floorIndex], floorIndex),
       status: 'ready', summary: '这是一段足够长的楼层摘要，用于触发容量压缩。',
       characters: [], relationships: [], clues: [], timeline: [], error: '', updatedAt: new Date().toISOString(),
     });

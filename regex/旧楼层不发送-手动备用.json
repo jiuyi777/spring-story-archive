@@ -1,0 +1,15 @@
+{
+  "id": "78539a44-7447-4c29-a42f-aa3c4b491d39",
+  "scriptName": "春序档案 · 旧楼层不发送（手动备用，先确认摘要覆盖）",
+  "findRegex": "/[\\s\\S]+/g",
+  "replaceString": "",
+  "trimStrings": [],
+  "placement": [1, 2],
+  "disabled": true,
+  "markdownOnly": false,
+  "promptOnly": true,
+  "runOnEdit": false,
+  "substituteRegex": 0,
+  "minDepth": 5,
+  "maxDepth": null
+}

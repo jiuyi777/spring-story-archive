@@ -1,4 +1,4 @@
-import { RAW_FLOOR_LIMIT } from './privacy-payload.js';
+import { RAW_FLOOR_LIMIT, validSummaries } from './privacy-payload.js';
 
 function normalizeText(value) {
   return String(value ?? '').replace(/\u0000/g, '').trim();
@@ -197,6 +197,7 @@ export class SemanticRecallService {
   }
 
   async recall({ chatKey, summaries, chat, targetFloorIndex, topK, threshold, recentRawFloorLimit = RAW_FLOOR_LIMIT, force = false }) {
+    summaries = validSummaries(summaries, chat).filter((record) => record.floorIndex <= targetFloorIndex);
     const vectors = await this.sync(chatKey, summaries, { force });
     const rawLimit = Math.max(0, Math.min(RAW_FLOOR_LIMIT, Math.floor(Number(recentRawFloorLimit) || 0)));
     const query = rawLimit > 0

@@ -96,14 +96,11 @@ test('batch summary payload includes only its target floors', () => {
   assert.equal(payload.policy.olderRawFloorsIncluded, false);
 });
 
-test('batch summary payload stays within the 6500 token input ceiling', () => {
+test('oversized target floors require splitting instead of accepting truncated input', () => {
   const huge = '很长的楼层内容'.repeat(4000);
-  const payload = buildSummaryBatchPayload({
-    chat: Array.from({ length: 20 }, () => ({ mes: huge, name: '很长的名字'.repeat(100) })),
+  assert.throws(() => buildSummaryBatchPayload({
+    chat: Array.from({ length: 20 }, () => ({ mes: huge })),
     floorIndexes: Array.from({ length: 20 }, (_, index) => index),
     rollingSummary: huge,
-  });
-  assert.ok(estimateTokens(JSON.stringify(payload)) <= REMOTE_INPUT_TOKEN_LIMIT);
-  assert.equal(payload.policy.contentTruncated, true);
-  assert.equal(payload.targetFloors.length, 20);
+  }), /分批或分段/);
 });
