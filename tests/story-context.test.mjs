@@ -1,3 +1,5 @@
+import { createSendHistory } from '../core/send-history.js';
+import { createMemoryStorage } from '../core/storage.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -17,7 +19,7 @@ test('normal generation injects summary even without semantic recall; filters on
   const original = structuredClone(data.sourceChat);
   const prompts = new Map();
   const context = { chat: data.sourceChat, stopGeneration() {}, eventTypes: { GENERATE_AFTER_DATA: 'generate_after_data' }, setExtensionPrompt: (key, text) => prompts.set(key, text) };
-  const status = await injectStoryContext({ context, storage: { listSummaries: async () => data.summaries, listCheckpoints: async () => [] }, chatKey: 'A', promptChat: data.promptChat, contextSize: 32000, enabled: true, filter: true, isCurrent: () => true });
+  const status = await injectStoryContext({ context, storage: { ...createMemoryStorage(), listSummaries: async () => data.summaries, listCheckpoints: async () => [] }, chatKey: 'A', promptChat: data.promptChat, contextSize: 32000, enabled: true, filter: true, isCurrent: () => true });
   assert.match(prompts.get(STORY_PROMPT_ID), /摘要0/);
   assert.deepEqual(data.promptChat.map(row => row.index), [4, 5, 6, 7, 8]);
   assert.deepEqual(data.sourceChat, original);
@@ -84,7 +86,7 @@ test('disabled, quiet, stale and unsupported contexts keep all raw history', asy
   for (const variation of [{ enabled: false }, { type: 'quiet' }, { isCurrent: () => false }, { unsupported: true }]) {
     const data = fixture();
     const context = { chat: data.sourceChat, ...(variation.unsupported ? {} : { setExtensionPrompt() {} }) };
-    await injectStoryContext({ context, storage: { listSummaries: async () => data.summaries, listCheckpoints: async () => [] }, chatKey: 'A', promptChat: data.promptChat, contextSize: 32000, enabled: true, filter: true, isCurrent: () => true, ...variation });
+    await injectStoryContext({ context, storage: { ...createMemoryStorage(), listSummaries: async () => data.summaries, listCheckpoints: async () => [] }, chatKey: 'A', promptChat: data.promptChat, contextSize: 32000, enabled: true, filter: true, isCurrent: () => true, ...variation });
     assert.equal(data.promptChat.length, 9);
   }
 });
@@ -109,10 +111,10 @@ test('real interceptor restores raw history and aborts if summary is disabled du
   let release;
   let started;
   const reachedRecall = new Promise(resolve => { started = resolve; });
-  const sandbox = { storyRequest: null, createStoryRequest,
+  const sandbox = { storyRequest: null, sendHistory: null, createSendHistory, renderSendHistory() {}, setStatus() {}, createStoryRequest,
     getContext: () => context, currentChatKey: () => 'A', getSettings: () => settings,
     fingerprintMessage, injectStoryContext, STORY_PROMPT_ID, RECALL_PROMPT_ID: 'recall',
-    engine: { chatKey: 'A', storage: { listSummaries: async () => data.summaries, listCheckpoints: async () => [] } },
+    engine: { chatKey: 'A', storage: { ...createMemoryStorage(), listSummaries: async () => data.summaries, listCheckpoints: async () => [] } },
     clearStoryPrompt: () => prompts.set(STORY_PROMPT_ID, ''), clearRecallPrompt: () => prompts.set('recall', ''),
     showStoryContextStatus() {}, renderRecallState() {}, root: {}, recallState: {},
     recallForCurrentContext: async () => { started(); return new Promise(resolve => { release = resolve; }); },
@@ -137,10 +139,10 @@ test('real interceptor injects normal summary when semantic recall is off', asyn
   const functions = source.slice(source.indexOf('function clearStoryPrompt('), source.indexOf('function showStoryContextStatus(')) + source.slice(source.indexOf('async function semanticRecallInterceptor('), source.indexOf('\nfunction scheduleReconcile('));
   const prompts = new Map();
   const context = { chat: data.sourceChat, stopGeneration() {}, eventTypes: { GENERATE_AFTER_DATA: 'generate_after_data' }, setExtensionPrompt: (key, text) => prompts.set(key, text) };
-  const sandbox = { storyRequest: null, createStoryRequest,
+  const sandbox = { storyRequest: null, sendHistory: null, createSendHistory, renderSendHistory() {}, setStatus() {}, createStoryRequest,
     getContext: () => context, currentChatKey: () => 'A', getSettings: () => ({ summaryContextEnabled: true, filterArchivedFloors: true, semanticRecallEnabled: false }),
     fingerprintMessage, injectStoryContext, STORY_PROMPT_ID,
-    engine: { chatKey: 'A', storage: { listSummaries: async () => data.summaries, listCheckpoints: async () => [] } },
+    engine: { chatKey: 'A', storage: { ...createMemoryStorage(), listSummaries: async () => data.summaries, listCheckpoints: async () => [] } },
     clearStoryPrompt: () => prompts.set(STORY_PROMPT_ID, ''), clearRecallPrompt() {},
     showStoryContextStatus() {}, renderRecallState() {}, root: {}, recallState: {},
   };

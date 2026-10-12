@@ -36,7 +36,7 @@ function harness(chat, generateRaw, settings = {}) {
   return { storage, context, engine };
 }
 const payloadOf = ({ prompt }) => JSON.parse(prompt.replace(/^user:\s*/, ''));
-const responseFor = (payload) => JSON.stringify({ floors: payload.targetFloors.map(({ floor }) => ({ floor, summary: `完整输入的摘要${floor}` })) });
+const responseFor = (payload) => JSON.stringify({ floors: payload.targetFloors.map(({ floor }) => ({ floor, summary: `完整输入的摘要${floor}`, changes: [] })) });
 
 test('uneven floor lengths share the budget and preserve the middle fact', () => {
   const text = 'a'.repeat(5500) + 'MIDDLE_FACT' + 'b'.repeat(5500);
@@ -108,7 +108,7 @@ test('legacy summaries stay readable and keep raw text until explicit backfill',
   const { storage, engine } = harness(f.sourceChat, async (request) => responseFor(payloadOf(request)));
   for (const record of f.summaries) await storage.putSummary(record);
   const result = await engine.backfill(10);
-  assert.equal(result.queuedCount, 1);
+  assert.equal(result.queuedCount, 9); // Existing prose is explicitly migrated to table-aware records.
   await engine.waitForIdle();
   assert.equal((await storage.listSummaries('A'))[0].inputComplete, true);
 });
@@ -222,7 +222,7 @@ test('recall rejects the same stale records as story summary without network acc
 function indexHarness(context, settings, engine) {
   const sandbox = {
     getContext: () => context, currentChatKey: () => engine.chatKey, getSettings: () => settings,
-    engine, fingerprintMessage, createStoryRequest, storyRequest: null, advanceEpoch: 0, autoAdvanceRemaining: 1,
+    engine, fingerprintMessage, createStoryRequest, storyRequest: null, sendHistory: null, advanceEpoch: 0, autoAdvanceRemaining: 1,
     advancing: false, root: {}, document: { querySelector: () => ({ value: '' }) }, window: { setTimeout() {} },
     getPlayerPreferenceProfile: async () => ({ summary: 'profile' }), setStatus() {}, saveSettings() {}, syncSettings() {}, getApiKey: () => '',
     showStoryContextStatus() {}, clearRecallPrompt() {}, refreshView: async () => {}, buildPrivacyPayload,

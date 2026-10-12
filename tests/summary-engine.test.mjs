@@ -36,6 +36,7 @@ function batchResponse(request, { omitFloors = [], prefix = '摘要' } = {}) {
       .map(({ floor }) => ({
         floor,
         summary: `${prefix}${floor}`,
+        changes: [],
         characters: [],
         relationships: [],
         clues: [],

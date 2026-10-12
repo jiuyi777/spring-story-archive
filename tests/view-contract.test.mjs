@@ -15,10 +15,11 @@ test('the latest five floors expand by default and older floors stay folded', ()
   );
 });
 
-test('preference quiz is a secondary page and NPC has its own navigation page', async () => {
+test('preference quiz is secondary and three primary pages retain NPC management', async () => {
   const source = await readFile(new URL('../ui/view.js', import.meta.url), 'utf8');
-  assert.match(source, /data-tab="npc"/);
-  assert.match(source, /data-page="npc"/);
+  assert.match(source, /data-tab="database"/);
+  assert.match(source, /data-page="sending"/);
+  assert.match(source, /data-role="npc-list"/);
   assert.match(source, /data-page="preference-test"/);
   assert.match(source, /data-role="retest-confirm"/);
   assert.doesNotMatch(source, /data-page="advance"[\s\S]*?<details class="ssa-quiz-panel">/);
@@ -139,7 +140,7 @@ test('mobile archive uses continuous floor rows, a solid single-line nav, and a 
     readFile(new URL('../style.css', import.meta.url), 'utf8'),
   ]);
   assert.match(view, /<span>不同意<\/span>[\s\S]*?<span>中立 \/ 不知道<\/span>[\s\S]*?<span>同意<\/span>/);
-  assert.match(view, /data-tab="npc">NPC<\/button>/);
+  assert.match(view, /data-tab="sending">楼层发送<\/button>/);
   assert.match(style, /\.ssa-floor-card \{[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*transparent;/);
   assert.match(style, /@media \(max-width: 720px\)[\s\S]*?\.ssa-tabs \{[\s\S]*?background:\s*#f8f4e8;/);
   assert.match(style, /\.ssa-tabs button \{[\s\S]*?font-family:\s*var\(--ssa-kai-font\);[\s\S]*?white-space:\s*nowrap;/);

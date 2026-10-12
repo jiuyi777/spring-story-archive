@@ -3,7 +3,8 @@ import {
   REMOTE_INPUT_TOKEN_LIMIT,
   splitInputText,
   truncateToTokenBudget,
-} from './privacy-payload.js';
+} from './privacy-payload.js?v=0.7.1';
+import { validateMemoryChanges, MEMORY_VERSION } from './memory-database.js?v=0.7.1';
 
 function stripCodeFence(value) {
   return String(value ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
@@ -11,14 +12,31 @@ function stripCodeFence(value) {
 
 export function parseJsonEnvelope(value) {
   if (value && typeof value === 'object') return value;
-  const text = stripCodeFence(value);
+  const text = stripCodeFence(String(value ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, ''));
   try {
     return JSON.parse(text);
   } catch {
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));
-    throw new Error('模型没有返回可识别的 JSON。');
+    // Read balanced JSON blocks, including braces inside quoted strings.
+    const candidates = [];
+    for (let start = 0; start < text.length; start += 1) {
+      if (!'{['.includes(text[start])) continue;
+      let depth = 0, quoted = false, escaped = false;
+      for (let end = start; end < text.length; end += 1) {
+        const char = text[end];
+        if (quoted) {
+          if (escaped) escaped = false;
+          else if (char === '\\') escaped = true;
+          else if (char === '"') quoted = false;
+        } else if (char === '"') quoted = true;
+        else if ('{['.includes(char)) depth += 1;
+        else if ('}]'.includes(char) && --depth === 0) {
+          try { candidates.push(JSON.parse(text.slice(start, end + 1))); start = end; } catch {}
+          break;
+        }
+      }
+    }
+    if (candidates.length) return candidates.at(-1);
+    throw new Error('接口返回的内容不是完整的结构化结果。');
   }
 }
 
@@ -85,6 +103,7 @@ export async function callOpenAiCompatible({ endpoint, apiKey, model, messages, 
     throw new Error(`额外 API 返回 ${response.status}${detail ? `：${detail}` : ''}`);
   }
   const data = await response.json();
+  if (data?.choices?.[0]?.finish_reason === 'length') throw new Error('接口输出达到长度上限，记忆结果被截断；请提高接口输出上限后重试。');
   const content = data?.choices?.[0]?.message?.content;
   if (typeof content !== 'string' || !content.trim()) throw new Error('额外 API 没有返回正文。');
   return content;
@@ -127,7 +146,7 @@ function payloadText(payload) {
   }, null, 2);
 }
 
-function normalizeFloorSummary(parsed, floor) {
+function normalizeFloorSummary(parsed, floor, structuredMemory = false) {
   const summary = String(parsed?.summary ?? '').trim();
   if (!summary) return null;
   return {
@@ -137,6 +156,7 @@ function normalizeFloorSummary(parsed, floor) {
     relationships: Array.isArray(parsed.relationships) ? parsed.relationships.map(String).filter(Boolean).slice(0, 12) : [],
     clues: Array.isArray(parsed.clues) ? parsed.clues.map(String).filter(Boolean).slice(0, 12) : [],
     timeline: Array.isArray(parsed.timeline) ? parsed.timeline.map(String).filter(Boolean).slice(0, 12) : [],
+    ...(structuredMemory ? { memoryVersion: MEMORY_VERSION, memoryChanges: validateMemoryChanges(parsed.changes) } : {}),
   };
 }
 
@@ -147,31 +167,46 @@ export async function requestFloorSummaries(provider, payload) {
     .map((item) => Number(item?.floor))
     .filter((floor) => Number.isInteger(floor) && floor > 0);
   if (!expectedFloors.length) throw new Error('批量摘要没有可处理的目标楼层。');
-  const raw = await provider({
-    maxTokens: Math.min(6000, Math.max(900, expectedFloors.length * 320)),
+  const structuredMemory = Boolean(payload.memorySchema);
+  const request = {
+    maxTokens: Math.min(6000, Math.max(1400, expectedFloors.length * 650)),
     messages: [
       {
         role: 'system',
-        content: `你是长篇角色扮演档案员。一次处理 ${expectedFloors.length} 个目标楼层，每一楼都必须按原楼号分别返回，不得合并或漏楼。只依据提供的滚动摘要与 targetFloors 概括各目标楼层。玩家 user 的原话必须准确记录，并附带楼层顺序，不得用角色回复稀释或改写玩家意图。同一主题出现后续明确更新时，以更晚楼层作为当前状态；旧决定、拒绝、同意、偏好或边界只保留为当时发生过的历史，不继续当作当前约束，不得把任何单次表态永久化。时间线必须按楼层顺序记录：明确区分已发生、正在发生和计划中的事，不得无故跳时、回溯、换地点或改变人物关系。不得补写剧情。只输出 JSON：{"floors":[{"floor":楼号,"summary":"80到180字摘要","characters":["人物状态或变化"],"relationships":["人物关系及变化"],"clues":["伏笔或线索"],"timeline":["时间 · 地点 · 已发生事件"]}]}。floors 必须恰好覆盖 ${expectedFloors.join('、')} 楼；没有内容的数组保持为空。`,
+        content: `你维护长篇剧情记忆数据库。按原楼号处理 ${expectedFloors.join('、')} 楼。summary 直接写谁在何时何地做了什么、产生什么结果；一两句够用就停止，不设最低字数。记录真实剧情事实，略过关于楼层、写作过程、用户指令、是否展开剧情的解说。时间地点不明就省略，数组无事实就留空。准确保留玩家 user 的原话含义及楼层顺序；不得用角色回复稀释或改写玩家意图。同一主题以更晚楼层的明确更新为当前状态，旧决定、拒绝、同意、偏好或边界只保留为当时发生过的历史，不得把任何单次表态永久化。区分已发生、当前状态与计划，不补写剧情。只输出 JSON：{"floors":[{"floor":楼号,"summary":"精简事实","characters":[],"relationships":[],"clues":[],"timeline":[]${structuredMemory ? ',"changes":[{"table":"characters","id":"人物姓名","values":{"name":"人物姓名","state":"本楼明确的新状态"}}]' : ''}}]}。每楼分别返回，空数组仍保留。${structuredMemory ? '同时用 changes 增量更新 memorySchema 中的表格。currentMemory 仅作身份与已有状态参考，每条变更须有本楼原文的明确依据。人物按姓名、新物品和技能按首次拥有者/名称建立 id，关系按两端人物、任务与线索按名称建立 id；同一实体沿用已有 id。物品转交后沿用原 id，只更新 owner，不能同时保留两个持有人；消耗和转交必须已发生，计划与猜测不改变归属。scene 的 id 固定为 current。只填写本楼发生变化且有依据的字段；未变的旧字段由程序保留。资源消耗写剩余数量，任务完成写完成状态。没有状态变化时 changes=[]。人物别名须有明确指代依据；同名身份不明时保持分开。knowledge 只记该人物明确知晓的信息，秘密与推测注明范围，不能当作所有人都知道。事件表由程序从 summary 自动生成。' : ''}`,
       },
       { role: 'user', content: input },
     ],
-  });
+  };
+  const read = (raw) => {
   const parsed = parseJsonEnvelope(raw);
-  const rows = Array.isArray(parsed?.floors) ? parsed.floors : [];
+  const rows = Array.isArray(parsed?.floors) ? parsed.floors : Array.isArray(parsed) ? parsed : expectedFloors.length === 1 && parsed?.summary ? [{ ...parsed, floor: parsed.floor ?? expectedFloors[0] }] : [];
   const expected = new Set(expectedFloors);
   const results = [];
   const seen = new Set();
   for (const row of rows) {
     const floor = Number(row?.floor);
     if (!expected.has(floor) || seen.has(floor)) continue;
-    const normalized = normalizeFloorSummary(row, floor);
+    const normalized = normalizeFloorSummary(row, floor, structuredMemory);
     if (!normalized) continue;
     seen.add(floor);
     results.push(normalized);
   }
   if (!results.length) throw new Error('模型没有返回可用的逐楼摘要。');
   return results.sort((left, right) => left.floor - right.floor);
+  };
+  const raw = await provider(request);
+  try { return read(raw); }
+  catch (error) {
+    if (!structuredMemory) throw error;
+    // One bounded retry from the original input; never treat prose as verified table data.
+    const repaired = await provider({ ...request, messages: [
+      { ...request.messages[0], content: request.messages[0].content + '\n上一响应未通过结构校验。直接返回完整 JSON 对象，floors 中每楼必须包含 summary 和 changes 数组；保持字符串闭合，省去解释与代码围栏。' },
+      request.messages[1],
+    ] });
+    try { return read(repaired); }
+    catch { throw new Error('记忆整理结果仍不完整，自动修复未成功；已保留原文与上一份有效档案，请重试或更换摘要接口。'); }
+  }
 }
 
 export async function requestFloorSummary(provider, payload) {
@@ -234,7 +269,7 @@ const MODE_LABELS = {
   mixed: '混合表达：根据当前情境在玩家行动、场景入口和第三人称叙事之间合理分配，三种表达至少各出现一次，并保持每个选项本身表达清楚。',
 };
 
-export async function requestStoryOptions(provider, payload, { mode = 'guided', count = 6, playerProfile = null } = {}) {
+export async function requestStoryOptions(provider, payload, { mode = 'guided', count = 6, playerProfile = null, writingNotes = '' } = {}) {
   const safeCount = Math.max(4, Math.min(12, Number(count) || 6));
   const raw = await provider({
     maxTokens: Math.max(500, safeCount * 100),
@@ -243,7 +278,7 @@ export async function requestStoryOptions(provider, payload, { mode = 'guided', 
         role: 'system',
         content: `你是互动叙事选项设计者。玩家原话必须结合楼层顺序理解；同一主题出现后续明确更新时，以更晚楼层作为当前状态，旧表态只作为历史，不得把任何单次决定、拒绝、同意、偏好或边界永久化。${MODE_LABELS[mode] ?? MODE_LABELS.guided} 生成恰好 ${safeCount} 个彼此明显不同、能继续当前剧情的选项。不得破坏档案里的时间先后、当前地点和人物关系。只输出 JSON：{"options":["选项"]}。`,
       },
-      { role: 'user', content: payloadText({ ...payload, playerPreferenceProfile: playerProfile }) },
+      { role: 'user', content: payloadText({ ...payload, playerPreferenceProfile: playerProfile, optionWritingRequirements: String(writingNotes).slice(0, 4000) }) },
     ],
   });
   const options = parseJsonEnvelope(raw).options;

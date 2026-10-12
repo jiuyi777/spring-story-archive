@@ -1,4 +1,10 @@
-import { buildPrivacyPayload, fingerprintMessage, validSummaries } from './core/privacy-payload.js';
+import { createSendHistory } from './core/send-history.js?v=0.7.1';
+import { renderSendHistory } from './ui/send-view.js?v=0.7.1';
+import { createChatOptions } from './ui/chat-options.js?v=0.7.1';
+import { buildPrivacyPayload, fingerprintMessage, validSummaries, estimateTokens, truncateToTokenBudget, isControlMessage } from './core/privacy-payload.js?v=0.7.1';
+import { formatMemoryDatabase, applyNarrativeEdits } from './core/memory-database.js?v=0.7.1';
+import { renderMemoryDatabase, collectMemoryEdit } from './ui/memory-view.js?v=0.7.1';
+import { openApiProfiles } from './core/api-profiles.js?v=0.7.1';
 import {
   callOpenAiCompatible,
   createProvider,
@@ -8,12 +14,12 @@ import {
   requestNpcProfile,
   requestPlayerPreferenceProfile,
   requestStoryOptions,
-} from './core/api-client.js';
-import { isPreferenceQuizComplete, scorePreferenceQuiz, STORY_EXPERIENCE_OPTIONS } from './core/preference-quiz.js';
-import { openArchiveStorage } from './core/storage.js';
-import { SummaryEngine } from './core/summary-engine.js';
-import { SemanticRecallService } from './core/semantic-recall.js';
-import { createStoryRequest, injectStoryContext, STORY_PROMPT_ID } from './core/story-context.js';
+} from './core/api-client.js?v=0.7.1';
+import { isPreferenceQuizComplete, scorePreferenceQuiz, STORY_EXPERIENCE_OPTIONS } from './core/preference-quiz.js?v=0.7.1';
+import { openArchiveStorage } from './core/storage.js?v=0.7.1';
+import { SummaryEngine } from './core/summary-engine.js?v=0.7.1';
+import { SemanticRecallService } from './core/semantic-recall.js?v=0.7.1';
+import { createStoryRequest, injectStoryContext, STORY_PROMPT_ID } from './core/story-context.js?v=0.7.1';
 import {
   createArchiveShell,
   collectNpcEdits,
@@ -23,7 +29,6 @@ import {
   renderAdvanceState,
   renderNpcs,
   renderModelOptions,
-  renderOptions,
   renderPlayerProfile,
   renderRecallState,
   renderSnapshot,
@@ -33,16 +38,19 @@ import {
   setStatus,
   switchTab,
   syncSettings,
-} from './ui/view.js';
+} from './ui/view.js?v=0.7.1';
 
 const MODULE_ID = 'spring-story-archive';
-const SECRET_KEY = `${MODULE_ID}:extra-api-key`;
+let apiProfiles = null;
+let modelFetchRevision = 0;
 const PLAYER_PROFILE_KEY = `${MODULE_ID}::player-preference`;
 const PLAYER_PROFILE_SCOPE = `${MODULE_ID}::global-player`;
 const RECALL_INTERCEPTOR = 'springStoryArchiveSemanticRecallInterceptor';
 const RECALL_PROMPT_ID = `${MODULE_ID}:semantic-recall`;
 const DEFAULT_SETTINGS = Object.freeze({
   autoSummarize: true,
+  memoryUpdateEvery: 1,
+  memoryMinTokens: 0,
   summaryContextEnabled: true,
   filterArchivedFloors: true,
   summarySource: 'current',
@@ -56,6 +64,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   optionCount: 6,
   optionSource: 'current',
   optionsEnabled: false,
+  optionWritingNotes: '',
   preferenceNotes: '',
   preferenceQuizAnswers: {},
   storyExperiencePreferences: [],
@@ -82,6 +91,11 @@ let reconcileTimer = 0;
 let autoAdvanceRemaining = 0;
 let advanceEpoch = 0;
 let storyRequest = null;
+let sendHistory = null;
+let chatOptions = null;
+let optionsRunning = false;
+let optionsPending = null;
+let receivedForPostTasks = false;
 let advancing = false;
 let focusLatestOnNextRender = false;
 let latestReadySignature = '';
@@ -132,6 +146,10 @@ function getSettings() {
     ? Number(merged.remoteRawFloorLimit)
     : 0;
   delete merged.npcFunction;
+  if (apiProfiles) {
+    const profile = apiProfiles.active();
+    Object.assign(merged, { extraEndpoint: profile.endpoint, extraModel: profile.model, recallEmbeddingModel: profile.embeddingModel });
+  }
   context.extensionSettings[MODULE_ID] = merged;
   return merged;
 }
@@ -141,20 +159,27 @@ function saveSettings() {
 }
 
 function getApiKey() {
-  try {
-    return sessionStorage.getItem(SECRET_KEY) ?? '';
-  } catch {
-    return '';
-  }
+  return apiProfiles?.active().apiKey ?? '';
 }
 
 function setApiKey(value) {
-  try {
-    if (value) sessionStorage.setItem(SECRET_KEY, value);
-    else sessionStorage.removeItem(SECRET_KEY);
-  } catch {
-    setStatus(root, '浏览器阻止了会话级 Key 保存', 'error');
-  }
+  apiProfiles.update({ apiKey: value });
+}
+
+function refreshApiProfiles() {
+  const selector = root.querySelector('[data-api-profile="select"]');
+  selector.replaceChildren(...apiProfiles.list().map(({ id, name }) => new Option(name, id)));
+  selector.value = apiProfiles.active().id;
+  root.querySelector('[data-api-profile="name"]').value = apiProfiles.active().name;
+  root.querySelector('[data-role="delete-api-confirm"]').hidden = true;
+  syncSettings(root, getSettings(), getApiKey());
+}
+
+function onApiProfileChanged() {
+  refreshApiProfiles();
+  clearRecallPrompt();
+  scheduleModelRefresh();
+  setStatus(root, `已切换到“${apiProfiles.active().name}”，之后的额外 API 请求使用此配置`);
 }
 
 function getExtraCredentials() {
@@ -169,6 +194,7 @@ function getExtraCredentials() {
 function getRecallCredentials() {
   const settings = getSettings();
   return {
+    profileId: apiProfiles?.active().id ?? '',
     endpoint: settings.extraEndpoint,
     apiKey: getApiKey(),
     embeddingModel: settings.recallEmbeddingModel,
@@ -186,10 +212,14 @@ function clearStoryPrompt() {
   const previous = storyRequest;
   storyRequest = null;
   previous?.cancel();
+  sendHistory?.finish('stopped');
+  sendHistory = null;
   getContext().setExtensionPrompt?.(STORY_PROMPT_ID, '', 1, 0, false, 0);
 }
 
-function finishStoryRequest() {
+function finishStoryRequest(status = 'interrupted') {
+  sendHistory?.finish(status);
+  sendHistory = null;
   storyRequest?.finish();
   storyRequest = null;
   clearStoryPrompt();
@@ -239,11 +269,12 @@ function focusLatestSummary() {
 async function refreshView() {
   if (!root || !engine) return;
   const chatKey = engine.chatKey;
-  const [snapshot, playerProfile, advanceState, npcs] = await Promise.all([
+  const [snapshot, playerProfile, advanceState, npcs, sends] = await Promise.all([
     engine.getSnapshot(),
     getPlayerPreferenceProfile(chatKey),
     chatKey ? engine.storage.getProfile(profileKey(chatKey, 'advance-state')) : null,
     chatKey ? engine.storage.listNpcs(chatKey) : [],
+    chatKey ? engine.storage.listSendRecords(chatKey) : [],
   ]);
   if (!root || !engine || engine.chatKey !== chatKey) return;
   const latest = snapshot.summaries.at(-1);
@@ -257,6 +288,8 @@ async function refreshView() {
     expandedFloorCount: settings.expandedFloorCount,
     resetDisclosure: resetFloorDisclosureOnNextRender,
   });
+  renderMemoryDatabase(root, snapshot.memory);
+  renderSendHistory(root, sends);
   resetFloorDisclosureOnNextRender = false;
   renderPlayerProfile(root, playerProfile);
   renderAdvanceState(root, advanceState);
@@ -273,6 +306,8 @@ async function switchCurrentChat({ queueMissing = false } = {}) {
   const changed = engine.chatKey !== chatKey;
   engine.setChat(chatKey);
   if (changed) {
+    receivedForPostTasks = false;
+    chatOptions?.show(null);
     latestReadySignature = '';
     recallState = {
       indexedCount: 0,
@@ -290,6 +325,7 @@ async function switchCurrentChat({ queueMissing = false } = {}) {
     return;
   }
   await engine.reconcile({ queueMissing });
+  await restoreChatOptions();
   setStatus(root, '本地档案已同步');
 }
 
@@ -306,7 +342,7 @@ async function recallForCurrentContext({ force = false, phase = 'matched', type 
   if (!task.isCurrent()) return { indexedCount: 0, records: [], prompt: '' };
   const result = await recallService.recall({
     chatKey: task.chatKey,
-    summaries: snapshot.summaries,
+    summaries: applyNarrativeEdits(snapshot.summaries, snapshot.memoryEdits, targetFloorIndex),
     chat: context.chat,
     targetFloorIndex,
     topK: settings.recallTopK,
@@ -326,6 +362,19 @@ async function recallForCurrentContext({ force = false, phase = 'matched', type 
 }
 
 async function addSemanticRecall(payload) {
+  const task = captureChatTask();
+  queuePendingSummaries({ force: true });
+  await engine.waitForIdle();
+  if (!task.isCurrent()) throw new Error('聊天已变化，请重新执行。');
+  const snapshot = await engine.getSnapshot();
+  if (!task.isCurrent()) throw new Error('聊天已变化，请重新执行。');
+  const latestPlot = getContext().chat.findLastIndex((message) => !message.is_system && !isControlMessage(message));
+  const ready = validSummaries(snapshot.summaries, getContext().chat);
+  if (latestPlot >= 0 && !ready.some((record) => record.floorIndex === latestPlot)) {
+    throw new Error('最新剧情还没有成功入档，请先同步记忆；选项与推进将等待有效的剧情信息。');
+  }
+  payload = { ...payload, rollingSummary: truncateToTokenBudget(snapshot.rollup?.text ?? '', 2400),
+    currentMemory: formatMemoryDatabase(snapshot.memory, { budget: 1600, query: getContext().chat.slice(-5).map((message) => message.mes).join('\n') }) };
   if (!getSettings().semanticRecallEnabled) return payload;
   try {
     const result = await recallForCurrentContext({ phase: 'feature' });
@@ -338,6 +387,7 @@ async function addSemanticRecall(payload) {
 }
 
 async function semanticRecallInterceptor(chat, contextSize, abort, type) {
+  if (type === 'quiet') return;
   finishStoryRequest();
   const original = [...chat];
   const chatKey = currentChatKey();
@@ -345,7 +395,15 @@ async function semanticRecallInterceptor(chat, contextSize, abort, type) {
   const { summaryContextEnabled, filterArchivedFloors } = getSettings();
   const isCurrent = () => currentChatKey() === chatKey && getContext().chat.map(fingerprintMessage).join('|') === signature
     && getSettings().summaryContextEnabled === summaryContextEnabled && getSettings().filterArchivedFloors === filterArchivedFloors;
-  const request = createStoryRequest({ context: getContext(), promptChat: chat, abort, isCurrent, onStatus: showStoryContextStatus });
+  const ledger = createSendHistory({ storage: engine.storage, chatKey, chat: getContext().chat, promptChat: chat, type, onChange: async (error) => {
+    if (!root) return;
+    if (error) { setStatus(root, `发送记录保存失败：${error.message}`, 'error'); return; }
+    if (root && engine?.chatKey === chatKey) renderSendHistory(root, await engine.storage.listSendRecords(chatKey));
+  } });
+  sendHistory = ledger;
+  const request = createStoryRequest({ context: getContext(), promptChat: chat, abort, isCurrent, onStatus: showStoryContextStatus, onEvidence: ledger.evidence });
+  request.recordPlan = (plan, filter) => ledger.plan(plan, filter);
+  request.recordRecall = (prompt, records) => ledger.recall(prompt, records);
   storyRequest = request;
   try {
     await prepareArchivePrompt(chat, contextSize, abort, type, request);
@@ -375,7 +433,7 @@ async function prepareArchivePrompt(chat, contextSize, abort, type, request) {
       context, storage: engine.storage, chatKey, promptChat: chat, contextSize, type,
       enabled: settings.summaryContextEnabled,
       filter: settings.filterArchivedFloors && canGuard,
-      onPlan: (plan) => { if (canGuard) request.plan(plan); },
+      onPlan: (plan) => { if (canGuard) request.plan(plan); request.recordPlan?.(plan, settings.filterArchivedFloors && canGuard); },
       isCurrent: () => currentChatKey() === chatKey && getSettings().summaryContextEnabled
         && getSettings().filterArchivedFloors === settings.filterArchivedFloors,
     });
@@ -413,6 +471,8 @@ async function prepareArchivePrompt(chat, contextSize, abort, type, request) {
       false,
       0,
     );
+    request.recordRecall?.(result.prompt, result.records);
+    request.recallPlan?.(result.prompt);
     recallState = {
       ...recallState,
       phase: result.prompt ? 'injected' : 'empty',
@@ -458,6 +518,9 @@ async function onMessageSent(messageId) {
 }
 
 async function onMessageReceived(messageId) {
+  const receivedFloor = messageIndexFromEvent(messageId);
+  sendHistory?.finish('received', receivedFloor);
+  receivedForPostTasks = true;
   const settings = getSettings();
   requestLatestSummaryFocus();
   scheduleReconcile({ queueMissing: false });
@@ -465,19 +528,31 @@ async function onMessageReceived(messageId) {
   if (settings.autoSummarize) pendingSummaryFloors.add(floorIndex);
 }
 
-function queuePendingSummaries() {
+function queuePendingSummaries({ force = false } = {}) {
+  const settings = getSettings();
+  if (!settings.autoSummarize && !force) return;
+  const chat = getContext().chat;
+  const indexes = [...pendingSummaryFloors];
+  const rounds = indexes.filter((index) => chat[index] && !chat[index].is_user).length;
+  const tokens = indexes.reduce((sum, index) => sum + (isControlMessage(chat[index]) ? 0 : estimateTokens(chat[index]?.mes)), 0);
+  if (!force && (rounds < Math.max(1, Number(settings.memoryUpdateEvery) || 1) || tokens < (Number(settings.memoryMinTokens) || 0))) return;
   engine.enqueueBatch([...pendingSummaryFloors].sort((left, right) => left - right));
   pendingSummaryFloors.clear();
 }
 
 function onGenerationEnded() {
-  finishStoryRequest();
+  const hasReply = receivedForPostTasks;
+  receivedForPostTasks = false;
+  finishStoryRequest('ended');
+  if (!hasReply) return;
   queuePendingSummaries();
   window.clearTimeout(postGenerationTimer);
-  postGenerationTimer = window.setTimeout(() => void runPostGenerationTasks(), 120);
+  postGenerationTimer = window.setTimeout(() => void runPostGenerationTasks().catch((error) => setStatus(root, error.message, 'error')), 120);
 }
 
 function onGenerationStopped() {
+  receivedForPostTasks = false;
+  sendHistory?.finish('stopped');
   advanceEpoch += 1;
   finishStoryRequest();
   autoAdvanceRemaining = 0;
@@ -486,7 +561,13 @@ function onGenerationStopped() {
 }
 
 async function runPostGenerationTasks() {
+  const task = captureChatTask();
+  if (getSettings().optionsEnabled) {
+    try { await generateOptions(); } catch (error) { setStatus(root, error.message, 'error'); }
+  }
+  if (!task.isCurrent()) return;
   if (getSettings().autoNpcEnabled) await runAutoNpcCheck();
+  if (!task.isCurrent()) return;
   if (autoAdvanceRemaining > 0 && !advancing) await runAutoAdvance();
 }
 
@@ -674,11 +755,38 @@ async function runAutoAdvance() {
   if (autoAdvanceRemaining > 0) window.setTimeout(() => void runAutoAdvance(), 180);
 }
 
+async function restoreChatOptions() {
+  if (!chatOptions || !getSettings().optionsEnabled) { chatOptions?.show(null); return; }
+  const task = captureChatTask();
+  const row = await engine.storage.getProfile(`${task.chatKey}::chat-options`);
+  const index = getContext().chat.length - 1;
+  if (!task.isCurrent()) return;
+  chatOptions.show(row && row.floorIndex === index && row.fingerprint === fingerprintMessage(getContext().chat[index], index) ? row : null);
+}
+
 async function generateOptions() {
+  if (optionsRunning) { optionsPending = captureChatTask(); return; }
+  optionsRunning = true;
+  const optionTask = captureChatTask();
+  const floorIndex = getContext().chat.length - 1;
+  try { await generateOptionsForCurrentReply(floorIndex); }
+  catch (error) {
+    if (optionTask.isCurrent() && getSettings().optionsEnabled) chatOptions?.show({ floorIndex, error: error.message });
+    throw error;
+  } finally {
+    optionsRunning = false;
+    const pending = optionsPending; optionsPending = null;
+    if (pending?.isCurrent() && getSettings().optionsEnabled) void generateOptions().catch((error) => setStatus(root, error.message, 'error'));
+  }
+}
+
+async function generateOptionsForCurrentReply(floorIndex) {
+  const task = captureChatTask();
   const settings = getSettings();
   if (!settings.optionsEnabled) throw new Error('请先开启剧情选项功能。');
   const context = getContext();
-  if (!context.chat.length) throw new Error('当前聊天还没有可生成选项的内容。');
+  if (!context.chat.length || context.chat[floorIndex]?.is_user) throw new Error('请等待角色回复后生成选项。');
+  chatOptions?.show({ floorIndex, loading: true });
   setStatus(root, '正在生成剧情选项……');
   if (settings.optionSource === 'current') await engine.waitForIdle();
   const rollup = await engine.storage.getRollup(engine.chatKey);
@@ -694,16 +802,23 @@ async function generateOptions() {
     extra: getExtraCredentials(),
   });
   const playerProfile = await getPlayerPreferenceProfile();
+  if (!task.isCurrent()) return;
   const options = await requestStoryOptions(provider, payload, {
     mode: settings.optionMode,
     count: settings.optionCount,
+    writingNotes: settings.optionWritingNotes,
     playerProfile,
   });
-  renderOptions(root, options, settings.optionMode);
+  if (!task.isCurrent()) return;
+  if (!getSettings().optionsEnabled) { chatOptions?.show(null); return; }
+  const saved = { key: `${task.chatKey}::chat-options`, chatKey: task.chatKey, floorIndex, fingerprint: fingerprintMessage(context.chat[floorIndex], floorIndex), options };
+  await engine.storage.putProfile(saved);
+  if (task.isCurrent()) chatOptions?.show(saved);
   setStatus(root, `已生成 ${options.length} 个剧情选项`);
 }
 
 async function analyzePreferences({ skipQuiz = false } = {}) {
+  const task = captureChatTask();
   const settings = getSettings();
   const context = getContext();
   if (!context.chat.length) throw new Error('当前聊天还没有可用于分析的内容。');
@@ -734,6 +849,7 @@ async function analyzePreferences({ skipQuiz = false } = {}) {
     selectedExperiences: STORY_EXPERIENCE_OPTIONS.filter((option) => selectedExperiences.includes(option.id)),
     notes: settings.preferenceNotes,
   });
+  if (!task.isCurrent()) return;
   const quizScores = skipQuiz ? {} : scorePreferenceQuiz(quizAnswers);
   await engine.storage.putProfile({
     key: PLAYER_PROFILE_KEY,
@@ -822,6 +938,7 @@ function chooseOption(text) {
 }
 
 async function testExtraApi() {
+  const profileId = apiProfiles.active().id;
   setStatus(root, '正在测试额外 API……');
   const result = await callOpenAiCompatible({
     ...getExtraCredentials(),
@@ -831,10 +948,11 @@ async function testExtraApi() {
       { role: 'user', content: '连接测试，不包含聊天内容。' },
     ],
   });
-  setStatus(root, `额外 API 已连接：${result.slice(0, 30)}`);
+  if (profileId === apiProfiles.active().id) setStatus(root, `额外 API 已连接：${result.slice(0, 30)}`);
 }
 
 async function refreshExtraModels({ quiet = false } = {}) {
+  const revision = ++modelFetchRevision;
   const credentials = getExtraCredentials();
   if (!String(credentials.endpoint ?? '').trim()) {
     renderModelOptions(root, [], '填写接口地址后会自动读取可用模型。');
@@ -844,11 +962,13 @@ async function refreshExtraModels({ quiet = false } = {}) {
   renderModelOptions(root, [], '正在从接口读取模型……');
   try {
     const models = await listOpenAiCompatibleModels(credentials);
+    if (revision !== modelFetchRevision || !root) return [];
     const settings = getSettings();
     if (!String(settings.recallEmbeddingModel ?? '').trim()) {
       const embeddingModel = models.find((model) => /embed(?:ding)?/i.test(model));
       if (embeddingModel) {
         settings.recallEmbeddingModel = embeddingModel;
+        apiProfiles.update({ embeddingModel });
         saveSettings();
       }
     }
@@ -857,6 +977,7 @@ async function refreshExtraModels({ quiet = false } = {}) {
     if (!quiet) setStatus(root, models.length ? `已读取 ${models.length} 个模型` : '接口没有返回模型列表', models.length ? 'normal' : 'warning');
     return models;
   } catch (error) {
+    if (revision !== modelFetchRevision || !root) return [];
     renderModelOptions(root, [], `自动读取失败：${error.message}；仍可手动输入。`);
     if (!quiet) setStatus(root, `模型读取失败：${error.message}`, 'error');
     return [];
@@ -864,19 +985,50 @@ async function refreshExtraModels({ quiet = false } = {}) {
 }
 
 function scheduleModelRefresh() {
+  modelFetchRevision += 1;
+  renderModelOptions(root, [], '配置已更新，准备读取模型；也可手动填写。');
   window.clearTimeout(modelFetchTimer);
   modelFetchTimer = window.setTimeout(() => void refreshExtraModels({ quiet: true }), 450);
 }
 
 async function handleAction(action, button) {
+  if (action === 'save-memory-row' || action === 'remove-memory-row') {
+    const edit = collectMemoryEdit(button.closest('[data-memory-row]'));
+    if (action === 'remove-memory-row') edit.operation = 'delete';
+    await engine.editMemory(edit);
+    renderMemoryDatabase(root, await engine.getMemory(), { force: true });
+    clearStoryPrompt();
+    setStatus(root, action === 'remove-memory-row' ? '条目已移除，来源楼层仍保留' : '记忆已保存，下次续写、选项和推进会使用新内容');
+    return;
+  }
+  if (action === 'add-memory-row') {
+    renderMemoryDatabase(root, await engine.getMemory(), { force: true, add: true });
+    return;
+  }
+  if (action === 'add-api-profile') {
+    apiProfiles.add();
+    onApiProfileChanged();
+    root.querySelector('[data-api-profile="name"]').focus();
+    return;
+  }
+  if (action === 'delete-api-profile' || action === 'cancel-delete-api') {
+    root.querySelector('[data-role="delete-api-confirm"]').hidden = action === 'cancel-delete-api';
+    return;
+  }
+  if (action === 'confirm-delete-api') {
+    apiProfiles.remove();
+    onApiProfileChanged();
+    return;
+  }
   if (action === 'open') {
     setOpen(root, true);
-    switchTab(root, 'summary');
+    switchTab(root, 'sending');
     requestLatestSummaryFocus();
     await switchCurrentChat({ queueMissing: false });
     window.requestAnimationFrame(focusLatestSummary);
     return;
   }
+  if (action === 'refresh-send-records') return refreshView();
   if (action === 'close') return setOpen(root, false);
   if (action === 'backfill') {
     const result = await engine.backfill(getSettings().backfillBatchSize);
@@ -930,7 +1082,7 @@ async function handleAction(action, button) {
     const task = captureChatTask();
     const snapshot = await engine.getSnapshot();
     if (!task.isCurrent()) return;
-    const vectors = await recallService.rebuild(task.chatKey, validSummaries(snapshot.summaries, getContext().chat));
+    const vectors = await recallService.rebuild(task.chatKey, validSummaries(applyNarrativeEdits(snapshot.summaries, snapshot.memoryEdits), getContext().chat));
     if (!task.isCurrent()) return;
     recallState = { indexedCount: vectors.length, recalledFloors: [], error: '', phase: 'indexed' };
     renderRecallState(root, recallState);
@@ -941,10 +1093,12 @@ async function handleAction(action, button) {
 
 async function handleSettingChange(input) {
   const key = input.dataset.setting;
+  const profileField = { extraEndpoint: 'endpoint', extraModel: 'model', recallEmbeddingModel: 'embeddingModel' }[key];
+  if (profileField) apiProfiles.update({ [profileField]: input.value.trim() });
   const settings = getSettings();
   settings[key] = input.type === 'checkbox'
     ? input.checked
-    : ['optionCount', 'backfillBatchSize', 'rollupTokenLimit', 'remoteRawFloorLimit', 'advanceRounds', 'expandedFloorCount', 'recallTopK', 'recallThreshold', 'recallDepth'].includes(key)
+    : ['optionCount', 'backfillBatchSize', 'rollupTokenLimit', 'remoteRawFloorLimit', 'advanceRounds', 'expandedFloorCount', 'recallTopK', 'recallThreshold', 'recallDepth', 'memoryUpdateEvery', 'memoryMinTokens'].includes(key)
       ? Number(input.value)
       : input.value;
   if (key === 'autoAdvanceEnabled' && settings.autoAdvanceEnabled) {
@@ -988,6 +1142,10 @@ async function handleSettingChange(input) {
     resetFloorDisclosureOnNextRender = true;
     await refreshView();
   }
+  if (key === 'optionsEnabled') {
+    if (!settings.optionsEnabled) chatOptions?.show(null);
+    else await restoreChatOptions();
+  }
   if (key === 'extraEndpoint') scheduleModelRefresh();
   setStatus(root, key === 'autoAdvanceEnabled' && settings.autoAdvanceEnabled
     ? '自主推进已开启，将从玩家下一次发言后生效'
@@ -1007,6 +1165,24 @@ function bindUi() {
     void handleAction(button.dataset.action, button).catch((error) => setStatus(root, error.message, 'error'));
   });
   root.addEventListener('change', (event) => {
+    if (event.target.matches('[data-role="memory-table-select"]')) {
+      void engine.getMemory().then((memory) => renderMemoryDatabase(root, memory, { force: true })).catch((error) => setStatus(root, error.message, 'error'));
+      return;
+    }
+    const profileInput = event.target.closest('[data-api-profile]');
+    if (profileInput) {
+      try {
+        if (profileInput.dataset.apiProfile === 'select') {
+          apiProfiles.select(profileInput.value);
+          onApiProfileChanged();
+        } else {
+          apiProfiles.update({ name: profileInput.value });
+          refreshApiProfiles();
+          setStatus(root, 'API 配置名称已保存');
+        }
+      } catch (error) { setStatus(root, error.message, 'error'); }
+      return;
+    }
     const quizInput = event.target.closest('[data-quiz-id]');
     if (quizInput || event.target.closest('[data-experience-id]')) return;
     const input = event.target.closest('[data-setting]');
@@ -1014,10 +1190,35 @@ function bindUi() {
     void handleSettingChange(input).catch((error) => setStatus(root, error.message, 'error'));
   });
   root.addEventListener('input', (event) => {
+    if (event.target.matches('[data-role="memory-search"]')) {
+      void engine.getMemory().then((memory) => renderMemoryDatabase(root, memory, { force: true })).catch((error) => setStatus(root, error.message, 'error'));
+      return;
+    }
+    const field = event.target.dataset?.setting;
+    if (['optionWritingNotes', 'preferenceNotes', 'npcBrief'].includes(field)) {
+      getSettings()[field] = event.target.value;
+      saveSettings();
+      return;
+    }
+    const profileField = { extraEndpoint: 'endpoint', extraModel: 'model', recallEmbeddingModel: 'embeddingModel' }[field];
+    const isName = event.target.dataset?.apiProfile === 'name';
+    if (profileField || isName) {
+      try {
+        apiProfiles.update({ [isName ? 'name' : profileField]: event.target.value });
+        if (isName) {
+          const selector = root.querySelector('[data-api-profile="select"]');
+          selector.selectedOptions[0].textContent = apiProfiles.active().name;
+        }
+        if (field === 'extraEndpoint') scheduleModelRefresh();
+      } catch (error) { setStatus(root, error.message, 'error'); }
+      return;
+    }
     const secret = event.target.closest('[data-secret="extraApiKey"]');
     if (secret) {
-      setApiKey(secret.value);
-      scheduleModelRefresh();
+      try {
+        setApiKey(secret.value);
+        scheduleModelRefresh();
+      } catch (error) { setStatus(root, error.message, 'error'); }
     }
   });
 }
@@ -1059,6 +1260,8 @@ async function initialize() {
     getSettings();
     const storage = await openArchiveStorage();
     root = createArchiveShell();
+    apiProfiles = openApiProfiles({ storage: localStorage, session: sessionStorage, legacy: getSettings() });
+    refreshApiProfiles();
     engine = new SummaryEngine({
       storage,
       getContext,
@@ -1070,6 +1273,7 @@ async function initialize() {
     globalThis[RECALL_INTERCEPTOR] = semanticRecallInterceptor;
     bindUi();
     bindHostEvents();
+    chatOptions = createChatOptions({ onChoose: (text) => { try { chooseOption(text); } catch (error) { setStatus(root, error.message, 'error'); } }, onRefresh: () => void generateOptions().catch((error) => setStatus(root, error.message, 'error')) });
     if (getSettings().semanticRecallEnabled && typeof getContext().setExtensionPrompt !== 'function') {
       getSettings().semanticRecallEnabled = false;
       recallState = { indexedCount: 0, recalledFloors: [], error: '当前酒馆版本不支持生成前注入。', phase: 'error' };
@@ -1082,11 +1286,13 @@ async function initialize() {
     if (getSettings().extraEndpoint) scheduleModelRefresh();
   } catch (error) {
     initialized = false;
+    if (root) setStatus(root, error.message, 'error');
     console.error(`[${MODULE_ID}]`, error);
   }
 }
 
 function cleanup() {
+  modelFetchRevision += 1;
   advanceEpoch += 1;
   window.clearTimeout(reconcileTimer);
   window.clearTimeout(modelFetchTimer);
@@ -1096,6 +1302,8 @@ function cleanup() {
     for (const [event, handler] of subscriptions) context.eventSource.off?.(event, handler);
   } catch {}
   subscriptions = [];
+  chatOptions?.destroy();
+  chatOptions = null;
   engine?.destroy();
   clearStoryPrompt();
   clearRecallPrompt();

@@ -1,9 +1,11 @@
 const DB_NAME = 'spring-story-archive';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 function requestResult(request) {
   return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
+    let blocked = false;
+    request.onblocked = () => { blocked = true; reject(new Error('档案升级被其他酒馆标签页占用，请关闭旧标签页后刷新。')); };
+    request.onsuccess = () => { if (blocked) request.result?.close?.(); else resolve(request.result); };
     request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
   });
 }
@@ -21,6 +23,10 @@ export function openArchiveStorage(indexedDb = globalThis.indexedDB) {
   const request = indexedDb.open(DB_NAME, DB_VERSION);
   request.onupgradeneeded = () => {
     const database = request.result;
+    if (!database.objectStoreNames.contains('sends')) {
+      const store = database.createObjectStore('sends', { keyPath: 'key' });
+      store.createIndex('chatKey', 'chatKey', { unique: false });
+    }
     if (!database.objectStoreNames.contains('summaries')) {
       const store = database.createObjectStore('summaries', { keyPath: 'key' });
       store.createIndex('chatKey', 'chatKey', { unique: false });
@@ -74,6 +80,8 @@ function createIndexedDbStorage(database) {
   }
 
   return {
+    listSendRecords: (chatKey) => getAllForChat('sends', chatKey),
+    putSendRecord: (value) => put('sends', value),
     listSummaries: (chatKey) => getAllForChat('summaries', chatKey),
     putSummary: (value) => put('summaries', value),
     deleteSummary: (key) => remove('summaries', key),
@@ -110,6 +118,7 @@ function createIndexedDbStorage(database) {
 }
 
 export function createMemoryStorage() {
+  const sends = new Map();
   const summaries = new Map();
   const checkpoints = new Map();
   const rollups = new Map();
@@ -117,6 +126,8 @@ export function createMemoryStorage() {
   const npcs = new Map();
   const vectors = new Map();
   return {
+    async listSendRecords(chatKey) { return [...sends.values()].filter((row) => row.chatKey === chatKey).map((row) => structuredClone(row)); },
+    async putSendRecord(value) { sends.set(value.key, structuredClone(value)); return value; },
     async listSummaries(chatKey) {
       return [...summaries.values()].filter((row) => row.chatKey === chatKey).map((row) => structuredClone(row));
     },

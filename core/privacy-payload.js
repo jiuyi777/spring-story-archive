@@ -2,6 +2,12 @@ export const RAW_FLOOR_LIMIT = 5;
 export const DEFAULT_RAW_FLOOR_LIMIT = 0;
 export const REMOTE_INPUT_TOKEN_LIMIT = 6500;
 
+export function isControlMessage(message) {
+  if (!message?.is_user || message?.is_system) return false;
+  const text = String(message.mes ?? '').trim().replace(/^[（(\[]|[）)\]]$/g, '').replace(/[。.!！\s]+$/g, '').trim();
+  return /^(继续|继续剧情|请继续|继续生成|接着写|往下写|continue|go on)$/i.test(text);
+}
+
 function normalizeText(value) {
   return String(value ?? '').replace(/\u0000/g, '').trim();
 }
@@ -24,8 +30,10 @@ export function fingerprintMessage(message, floorIndex) {
 }
 
 export function validSummaries(records, chat) {
-  return (records ?? []).filter((record) => record.status === 'ready' && record.summary?.trim()
+  return (records ?? []).map((record) => ['failed', 'processing', 'missing'].includes(record.status) && record.previous?.status === 'ready' ? record.previous : record)
+    .filter((record) => record.status === 'ready' && record.summary?.trim()
     && chat?.[record.floorIndex]
+    && !isControlMessage(chat[record.floorIndex])
     && record.messageFingerprint === fingerprintMessage(chat[record.floorIndex], record.floorIndex))
     .sort((a, b) => a.floorIndex - b.floorIndex);
 }
@@ -215,6 +223,8 @@ export function fingerprintSummaries(records) {
       messageFingerprint: record.messageFingerprint,
       priority: record.priority,
       inputComplete: record.inputComplete === true,
+      memoryVersion: record.memoryVersion,
+      memoryChanges: record.memoryChanges,
       summary: normalizeText(record.summary),
       timeline: Array.isArray(record.timeline) ? record.timeline.map(normalizeText) : [],
       characters: Array.isArray(record.characters) ? record.characters.map(normalizeText) : [],

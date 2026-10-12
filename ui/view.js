@@ -4,14 +4,7 @@ import {
   PREFERENCE_QUIZ_SOURCE,
   PREFERENCE_TRAIT_LABELS,
   STORY_EXPERIENCE_OPTIONS,
-} from '../core/preference-quiz.js?v=0.5.7';
-
-const MODE_NAMES = {
-  guided: '玩家行动（代入）',
-  scene: '场景入口',
-  third: '第三人称叙事',
-  mixed: '混合表达',
-};
+} from '../core/preference-quiz.js?v=0.7.1';
 
 const LAUNCHER_POSITION_KEY = 'spring-story-archive:launcher-position';
 const LAUNCHER_VIEWPORT_MARGIN = 6;
@@ -71,72 +64,30 @@ export function createArchiveShell() {
     <section class="ssa-app" role="dialog" aria-modal="true" aria-label="春序档案" hidden>
       <header class="ssa-header">
         <div>
-          <p class="ssa-eyebrow">逐楼摘要 · 时间线 · 剧情辅助</p>
+          <p class="ssa-eyebrow">剧情记忆数据库</p>
           <h1><span aria-hidden="true">❀</span> 春序档案</h1>
         </div>
         <button class="ssa-icon-button" type="button" data-action="close" aria-label="关闭">×</button>
       </header>
 
-      <div class="ssa-privacy-ribbon">
-        <span class="ssa-leaf-dot" aria-hidden="true"></span>
-        <strong>远端原文边界</strong>
-        <span data-role="remote-floor-boundary">默认不发送历史楼层原文</span>
-        <span class="ssa-local-badge">更早原文只留本机</span>
-      </div>
-
       <nav class="ssa-tabs" aria-label="档案页面">
-        <button class="is-active" type="button" data-tab="summary">楼层摘要</button>
-        <button type="button" data-tab="options">剧情选项</button>
-        <button type="button" data-tab="advance">自主推进</button>
-        <button type="button" data-tab="npc">NPC</button>
+        <button type="button" data-tab="database">数据库</button>
+        <button class="is-active" type="button" data-tab="sending">楼层发送</button>
         <button type="button" data-tab="settings">设置</button>
       </nav>
 
       <main class="ssa-main">
-        <section class="ssa-page is-active" data-page="summary">
-          <article class="ssa-summary-controls-card">
-            <h2>让 AI 读取剧情总摘要</h2>
-            <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>每次回复前发送总摘要</strong><small>自动读取当前聊天档案，正常聊天即可使用；无需开启语义回忆。</small></span>
-              ${switchControlMarkup('summaryContextEnabled', '每次回复前发送总摘要')}
-            </label>
-            <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>过滤已摘要的旧楼层原文</strong><small>保留最近 5 楼；更早且已被本轮摘要覆盖的原文只在发送时过滤，本地聊天记录完整保留。</small></span>
-              ${switchControlMarkup('filterArchivedFloors', '过滤已摘要的旧楼层原文')}
-            </label>
-            <p class="ssa-muted" data-role="story-context-status" role="status">等待下次回复前读取剧情总摘要</p>
+        <section class="ssa-page" data-page="database">
+          <div class="ssa-page-heading"><div><p class="ssa-kicker">自动整理 · 按需调用</p><h2>数据库</h2></div><button type="button" class="ssa-secondary-button" data-action="backfill">同步记忆</button></div>
+          <article class="ssa-paper-card">
+            <h2>记忆档案</h2>
+            <label>记忆表格<select data-role="memory-table-select"></select></label>
+            <label>查找记忆<input type="search" data-role="memory-search" placeholder="搜索人物、物品或相关事实"></label>
+            <p class="ssa-muted" data-role="memory-status">等待读取当前聊天记忆</p>
+            <div data-role="memory-rows"></div>
+            <button class="ssa-secondary-button" type="button" data-action="add-memory-row">添加记忆条目</button>
           </article>
-          <article class="ssa-summary-controls-card">
-            <div>
-              <p class="ssa-kicker">自动整理</p>
-              <h2>摘要压缩与楼层显示</h2>
-            </div>
-            <div class="ssa-summary-control-grid">
-              <label>自动压缩阈值（token）
-                <input type="number" min="1000" max="30000" step="500" data-setting="rollupTokenLimit">
-                <small>总摘要达到此值或每满 100 楼时自动压缩。</small>
-              </label>
-              <label>默认展开最近楼层
-                <select data-setting="expandedFloorCount">
-                  <option value="3">最近 3 楼</option>
-                  <option value="5">最近 5 楼</option>
-                  <option value="10">最近 10 楼</option>
-                </select>
-                <small>更早楼层默认折叠，点击楼层标题即可查看。</small>
-              </label>
-              <label class="ssa-summary-remote-control">发送给剧情辅助接口的历史原文
-                <select data-setting="remoteRawFloorLimit">
-                  <option value="0">不发送历史原文</option>
-                  <option value="1">最近 1 楼</option>
-                  <option value="3">最近 3 楼</option>
-                  <option value="5">最近 5 楼</option>
-                </select>
-                <small>默认不发送。批量逐楼摘要只发送正在整理的本批楼层，否则无法生成这些摘要；所有请求另有约 6500 token 的硬上限。</small>
-              </label>
-            </div>
-          </article>
-
-          <details class="ssa-rollup-card">
+<details class="ssa-settings-group"><summary>剧情记录与来源楼层</summary><div class="ssa-group-body">          <details class="ssa-rollup-card">
             <summary class="ssa-rollup-summary">
               <div>
                 <p class="ssa-kicker">长篇记忆</p>
@@ -175,13 +126,83 @@ export function createArchiveShell() {
           </div>
           <p class="ssa-muted">同一批楼层只调用一次摘要 API，返回后仍分别保存为逐楼摘要；内容过长时会自动拆批。</p>
           <div class="ssa-floor-list" data-role="floor-list"></div>
+        </div></details><details class="ssa-settings-group"><summary>NPC 扩展档案</summary><div class="ssa-group-body">          <div class="ssa-npc-list" data-role="npc-list">
+            <div class="ssa-empty-state"><p>当前聊天还没有由本插件生成的 NPC。</p></div>
+          </div>
+        </div></details>        </section>
+        <section class="ssa-page is-active" data-page="sending">
+          <div class="ssa-page-heading"><h2>最近的回复</h2><button type="button" class="ssa-secondary-button" data-action="refresh-send-records">刷新</button></div>
+          <p class="ssa-muted">点开一楼，看看这次带了什么记忆。</p>
+          <div data-role="send-records"><p class="ssa-empty-state">还没有发送记录。下次在酒馆生成回复时自动记录。</p></div>
+        </section>
+        <section class="ssa-page ssa-test-page" data-page="preference-test">
+          <header class="ssa-test-header">
+            <button class="ssa-icon-button ssa-back-button" type="button" data-action="close-preference-test" aria-label="返回自主推进">‹</button>
+            <div>
+              <p class="ssa-kicker">首次建立玩家偏好</p>
+              <h2>人格与剧情体验测试</h2>
+            </div>
+            <span>约 2 分钟</span>
+          </header>
+          <div class="ssa-test-intro">
+            <strong>没有正确答案</strong>
+            <p>点选答案只保存在当前页面，不会请求 AI。只有点击“完成测试并生成分析”才会调用接口。</p>
+            <p>用于调整互动、连续性、冲突强度与新奇程度，不作心理诊断。聊天里后来明确说出的选择和边界始终优先。</p>
+          </div>
+          <div class="ssa-quiz-questions">${preferenceQuizMarkup()}</div>
+          <section class="ssa-test-section">
+            <div class="ssa-section-heading">
+              <div><p class="ssa-kicker">可多选</p><h2>想要的剧情体验</h2></div>
+            </div>
+            <p class="ssa-muted">AI 会把这些选择与测试、聊天中的实际表达一起分析，不会按单个标签套模板。</p>
+            <div class="ssa-experience-grid">${storyExperienceMarkup()}</div>
+          </section>
+          <section class="ssa-test-section">
+            <label>其他想要或需要避免的内容
+              <textarea rows="3" data-setting="preferenceNotes" placeholder="例如：想要慢热友情；避免强制玩家表态。"></textarea>
+            </label>
+            <label>分析接口
+              <select data-setting="preferenceSource">
+                <option value="current">酒馆当前 API</option>
+                <option value="extra">额外 API</option>
+              </select>
+            </label>
+            <button class="ssa-primary-button ssa-wide-button" type="button" data-action="analyze-preferences">完成测试并生成分析</button>
+            <p class="ssa-quiz-source">${PREFERENCE_QUIZ_SOURCE.note} <a href="${PREFERENCE_QUIZ_SOURCE.permissionUrl}" target="_blank" rel="noopener noreferrer">公共领域说明</a></p>
+          </section>
         </section>
 
-        <section class="ssa-page" data-page="options">
+        <section class="ssa-page" data-page="settings">
+          <div class="ssa-page-heading"><div><p class="ssa-kicker">修改后自动保存</p><h2>设置</h2></div></div>
+<details class="ssa-settings-group"><summary>自动记忆与整理</summary><div class="ssa-group-body">
           <article class="ssa-paper-card">
-            <p class="ssa-kicker">生成剧情选项</p>
+            <p class="ssa-kicker">摘要与大总结</p>
+            <h2>摘要方式</h2>
+            <div class="ssa-summary-control-grid">
+              <label>自动同步频率<select data-setting="memoryUpdateEvery"><option value="1">每轮回复</option><option value="2">每 2 轮</option><option value="3">每 3 轮</option><option value="5">每 5 轮</option></select></label>
+              <label>积累多少内容后同步<input type="number" min="0" max="10000" step="100" data-setting="memoryMinTokens"><small>估算 token；0 表示立即同步。生成选项或推进时会先处理已积累的新楼层。</small></label>
+            </div>
+            <label class="ssa-switch-row">
+              <span class="ssa-switch-copy"><strong>自动记录新楼层</strong><small>只摘要之后新增、编辑或重选的楼层；旧楼层由“补全下一批”分批处理。</small></span>
+              ${switchControlMarkup('autoSummarize', '自动记录新楼层')}
+            </label>
+            <label>摘要使用接口
+              <select data-setting="summarySource">
+                <option value="current">酒馆当前 API</option>
+                <option value="extra">额外 API</option>
+              </select>
+            </label>
+            <label>自动压缩阈值（token）
+              <input type="number" min="1000" max="30000" step="500" data-setting="rollupTokenLimit">
+              <small>达到阈值后整理长期剧情。</small>
+            </label>
+          </article>
+
+</div></details><details class="ssa-settings-group"><summary>剧情选项 · 写法与数量</summary><div class="ssa-group-body">
+          <article class="ssa-paper-card">
+            <p class="ssa-kicker">正文下方显示</p>
             <h2>选择选项的表达方式和数量</h2>
-            <p class="ssa-muted">点击选项只会填入当前 SillyTavern 输入框，不会自动发送给 AI。</p>
+            <p class="ssa-muted">角色回复后自动生成，显示在正文下方；点击只填入输入框，不会自动发送给 AI。</p>
             <label class="ssa-switch-row">
               <span class="ssa-switch-copy"><strong>剧情选项功能</strong><small>由玩家决定是否开启；默认关闭。</small></span>
               ${switchControlMarkup('optionsEnabled', '剧情选项功能')}
@@ -208,14 +229,9 @@ export function createArchiveShell() {
                 </select>
               </label>
             </div>
-            <button class="ssa-primary-button ssa-wide-button" type="button" data-action="generate-options">生成剧情选项</button>
+            <label>写作要求<textarea rows="3" data-setting="optionWritingNotes" placeholder="例如：保留选择权，选项之间有明显区别。"></textarea></label>
           </article>
-          <div class="ssa-options-list" data-role="options-list">
-            <div class="ssa-empty-state"><p>尚未生成剧情选项。</p></div>
-          </div>
-        </section>
-
-        <section class="ssa-page" data-page="advance">
+</div></details><details class="ssa-settings-group"><summary>自主推进与玩家偏好</summary><div class="ssa-group-body">
           <article class="ssa-advance-hero">
             <div class="ssa-hero-mark" aria-hidden="true">春</div>
             <div>
@@ -262,9 +278,7 @@ export function createArchiveShell() {
             <p class="ssa-notice">自主推进会先校对时间、地点、人物状态和玩家边界。有未发送草稿时立即停止。</p>
           </article>
           <div class="ssa-result-card" data-role="advance-state">尚未执行自主推进。</div>
-        </section>
-
-        <section class="ssa-page" data-page="npc">
+        </div></details><details class="ssa-settings-group"><summary>NPC 生成规则</summary><div class="ssa-group-body">
           <article class="ssa-paper-card ssa-npc-archive-intro">
             <p class="ssa-kicker">当前聊天</p>
             <h2>NPC 人物档案</h2>
@@ -284,66 +298,93 @@ export function createArchiveShell() {
             </label>
             <button class="ssa-primary-button ssa-wide-button" type="button" data-action="generate-npc">立即生成 NPC 并存入档案</button>
           </article>
-          <div class="ssa-npc-list" data-role="npc-list">
-            <div class="ssa-empty-state"><p>当前聊天还没有由本插件生成的 NPC。</p></div>
-          </div>
-        </section>
-
-        <section class="ssa-page ssa-test-page" data-page="preference-test">
-          <header class="ssa-test-header">
-            <button class="ssa-icon-button ssa-back-button" type="button" data-action="close-preference-test" aria-label="返回自主推进">‹</button>
-            <div>
-              <p class="ssa-kicker">首次建立玩家偏好</p>
-              <h2>人格与剧情体验测试</h2>
-            </div>
-            <span>约 2 分钟</span>
-          </header>
-          <div class="ssa-test-intro">
-            <strong>没有正确答案</strong>
-            <p>点选答案只保存在当前页面，不会请求 AI。只有点击“完成测试并生成分析”才会调用接口。</p>
-            <p>用于调整互动、连续性、冲突强度与新奇程度，不作心理诊断。聊天里后来明确说出的选择和边界始终优先。</p>
-          </div>
-          <div class="ssa-quiz-questions">${preferenceQuizMarkup()}</div>
-          <section class="ssa-test-section">
-            <div class="ssa-section-heading">
-              <div><p class="ssa-kicker">可多选</p><h2>想要的剧情体验</h2></div>
-            </div>
-            <p class="ssa-muted">AI 会把这些选择与测试、聊天中的实际表达一起分析，不会按单个标签套模板。</p>
-            <div class="ssa-experience-grid">${storyExperienceMarkup()}</div>
-          </section>
-          <section class="ssa-test-section">
-            <label>其他想要或需要避免的内容
-              <textarea rows="3" data-setting="preferenceNotes" placeholder="例如：想要慢热友情；避免强制玩家表态。"></textarea>
+</div></details><details class="ssa-settings-group"><summary>接口配置 · 多套 API</summary><div class="ssa-group-body">          <article class="ssa-paper-card">
+            <p class="ssa-kicker">可选的额外接口</p>
+            <h2>额外 OpenAI-compatible API</h2>
+            <label>已保存的 API 配置
+              <select data-api-profile="select"><option value="">默认配置</option></select>
             </label>
-            <label>分析接口
-              <select data-setting="preferenceSource">
-                <option value="current">酒馆当前 API</option>
-                <option value="extra">额外 API</option>
-              </select>
+            <div class="ssa-api-profile-actions">
+              <button class="ssa-secondary-button" type="button" data-action="add-api-profile">新建配置</button>
+              <button class="ssa-secondary-button" type="button" data-action="delete-api-profile">删除此配置</button>
+            </div>
+            <div data-role="delete-api-confirm" hidden>
+              <p>删除当前配置及其保存的密钥？</p>
+              <div class="ssa-api-profile-actions">
+                <button class="ssa-secondary-button" type="button" data-action="confirm-delete-api">确认删除</button>
+                <button class="ssa-secondary-button" type="button" data-action="cancel-delete-api">取消</button>
+              </div>
+            </div>
+            <label>配置名称
+              <input type="text" autocomplete="off" placeholder="例如 主用接口、备用接口" data-api-profile="name">
+              <small>修改后自动保存。选择一套配置，供所有使用“额外 API”的功能调用。</small>
             </label>
-            <button class="ssa-primary-button ssa-wide-button" type="button" data-action="analyze-preferences">完成测试并生成分析</button>
-            <p class="ssa-quiz-source">${PREFERENCE_QUIZ_SOURCE.note} <a href="${PREFERENCE_QUIZ_SOURCE.permissionUrl}" target="_blank" rel="noopener noreferrer">公共领域说明</a></p>
-          </section>
-        </section>
+            <label>Chat Completions 完整地址
+              <input type="url" autocomplete="off" placeholder="https://example.com/v1/chat/completions" data-setting="extraEndpoint">
+            </label>
+            <label>模型（优先从接口自动读取）
+              <div class="ssa-input-action-row">
+                <input type="text" list="ssa-extra-model-list" autocomplete="off" placeholder="填写接口后自动读取，也可手动输入" data-setting="extraModel">
+                <button class="ssa-secondary-button" type="button" data-action="refresh-models">读取模型</button>
+              </div>
+              <datalist id="ssa-extra-model-list" data-role="extra-model-list"></datalist>
+              <small data-role="model-list-status">填写接口地址和 Key 后会自动读取可用模型。</small>
+            </label>
+            <label>API Key
+              <input type="password" autocomplete="new-password" placeholder="随当前配置保存在此浏览器" data-secret="extraApiKey">
+              <small>配置和密钥保存在当前浏览器，重开后保留；不随档案导出，也不会同步到其他设备。同页扩展仍可能读取密钥。</small>
+            </label>
+            <button class="ssa-secondary-button" type="button" data-action="test-extra-api">测试额外 API</button>
+          </article>
 
-        <section class="ssa-page" data-page="settings">
-          <article class="ssa-paper-card">
-            <p class="ssa-kicker">摘要与大总结</p>
-            <h2>摘要方式</h2>
+        </div></details><details class="ssa-settings-group"><summary>高级设置 · 发送与召回</summary><div class="ssa-group-body">      <div class="ssa-privacy-ribbon">
+        <span class="ssa-leaf-dot" aria-hidden="true"></span>
+        <strong>远端原文边界</strong>
+        <span data-role="remote-floor-boundary">默认不发送历史楼层原文</span>
+        <span class="ssa-local-badge">更早原文只留本机</span>
+      </div>
+
+
+          <article class="ssa-summary-controls-card">
+            <h2>让 AI 读取剧情总摘要</h2>
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>自动记录新楼层</strong><small>只摘要之后新增、编辑或重选的楼层；旧楼层由“补全下一批”分批处理。</small></span>
-              ${switchControlMarkup('autoSummarize', '自动记录新楼层')}
+              <span class="ssa-switch-copy"><strong>每次回复前发送总摘要</strong><small>自动读取当前聊天档案，正常聊天即可使用；无需开启语义回忆。</small></span>
+              ${switchControlMarkup('summaryContextEnabled', '每次回复前发送总摘要')}
             </label>
-            <label>摘要使用接口
-              <select data-setting="summarySource">
-                <option value="current">酒馆当前 API</option>
-                <option value="extra">额外 API</option>
-              </select>
+            <label class="ssa-switch-row">
+              <span class="ssa-switch-copy"><strong>过滤已摘要的旧楼层原文</strong><small>保留最近 5 楼；更早且已被本轮摘要覆盖的原文只在发送时过滤，本地聊天记录完整保留。</small></span>
+              ${switchControlMarkup('filterArchivedFloors', '过滤已摘要的旧楼层原文')}
             </label>
-            <label>自动压缩阈值（token）
-              <input type="number" min="1000" max="30000" step="500" data-setting="rollupTokenLimit">
-              <small>与摘要页顶部为同一设置。</small>
-            </label>
+            <p class="ssa-muted" data-role="story-context-status" role="status">等待下次回复前读取剧情总摘要</p>
+          </article>
+          <article class="ssa-summary-controls-card">
+            <div>
+              <p class="ssa-kicker">自动整理</p>
+              <h2>摘要压缩与楼层显示</h2>
+            </div>
+            <div class="ssa-summary-control-grid">
+              <label>自动压缩阈值（token）
+                <input type="number" min="1000" max="30000" step="500" data-setting="rollupTokenLimit">
+                <small>总摘要达到此值或每满 100 楼时自动压缩。</small>
+              </label>
+              <label>默认展开最近楼层
+                <select data-setting="expandedFloorCount">
+                  <option value="3">最近 3 楼</option>
+                  <option value="5">最近 5 楼</option>
+                  <option value="10">最近 10 楼</option>
+                </select>
+                <small>更早楼层默认折叠，点击楼层标题即可查看。</small>
+              </label>
+              <label class="ssa-summary-remote-control">发送给剧情辅助接口的历史原文
+                <select data-setting="remoteRawFloorLimit">
+                  <option value="0">不发送历史原文</option>
+                  <option value="1">最近 1 楼</option>
+                  <option value="3">最近 3 楼</option>
+                  <option value="5">最近 5 楼</option>
+                </select>
+                <small>默认不发送。批量逐楼摘要只发送正在整理的本批楼层，否则无法生成这些摘要；所有请求另有约 6500 token 的硬上限。</small>
+              </label>
+            </div>
           </article>
 
           <article class="ssa-paper-card ssa-recall-card">
@@ -357,7 +398,7 @@ export function createArchiveShell() {
             <label>嵌入模型（优先自动读取）
               <input type="text" list="ssa-embedding-model-list" autocomplete="off" placeholder="例如 text-embedding-3-small，也可手动输入" data-setting="recallEmbeddingModel">
               <datalist id="ssa-embedding-model-list" data-role="embedding-model-list"></datalist>
-              <small>复用下方额外 API 地址和本次会话 Key；模型列表中含 embed 的型号会优先自动选中。</small>
+              <small>使用下方选中的 API 配置和密钥；嵌入模型随配置保存，含 embed 的型号会优先自动选中。</small>
             </label>
             <div class="ssa-inline-fields is-three-columns">
               <label>召回数量
@@ -380,28 +421,7 @@ export function createArchiveShell() {
             <button class="ssa-secondary-button" type="button" data-action="rebuild-recall">重建语义索引</button>
           </article>
 
-          <article class="ssa-paper-card">
-            <p class="ssa-kicker">可选的额外接口</p>
-            <h2>额外 OpenAI-compatible API</h2>
-            <label>Chat Completions 完整地址
-              <input type="url" autocomplete="off" placeholder="https://example.com/v1/chat/completions" data-setting="extraEndpoint">
-            </label>
-            <label>模型（优先从接口自动读取）
-              <div class="ssa-input-action-row">
-                <input type="text" list="ssa-extra-model-list" autocomplete="off" placeholder="填写接口后自动读取，也可手动输入" data-setting="extraModel">
-                <button class="ssa-secondary-button" type="button" data-action="refresh-models">读取模型</button>
-              </div>
-              <datalist id="ssa-extra-model-list" data-role="extra-model-list"></datalist>
-              <small data-role="model-list-status">填写接口地址和 Key 后会自动读取可用模型。</small>
-            </label>
-            <label>API Key
-              <input type="password" autocomplete="new-password" placeholder="仅保留到本次浏览器会话" data-secret="extraApiKey">
-              <small>Key 仅放在 sessionStorage，不写入酒馆设置和档案数据库。同页扩展仍可能读取它。</small>
-            </label>
-            <button class="ssa-secondary-button" type="button" data-action="test-extra-api">测试额外 API</button>
-          </article>
-
-        </section>
+</div></details>        </section>
       </main>
 
       <div class="ssa-confirm-layer" data-role="retest-confirm" hidden>
@@ -417,8 +437,8 @@ export function createArchiveShell() {
       </div>
 
       <footer class="ssa-footer">
-        <span data-role="status">本地档案待命</span>
-        <span>IndexedDB · 按聊天隔离</span>
+        <span data-role="status" role="status">本地档案待命</span>
+        <span>档案仅保存在此浏览器</span>
       </footer>
     </section>
   `;
@@ -622,11 +642,11 @@ function makeFloorCard(record, expanded) {
   const header = document.createElement('summary');
   header.className = 'ssa-floor-header';
   const title = document.createElement('div');
-  title.innerHTML = `<span class="ssa-floor-number">${record.floorIndex + 1}</span><div><p>第 ${record.floorIndex + 1} 楼 · ${record.isUser ? '玩家输入' : '角色回复'}</p><small>${record.isUser ? '玩家原文记录 · ' : ''}${record.status === 'ready' ? '摘要已入档' : record.status === 'processing' ? '正在整理' : record.status === 'failed' ? '整理失败' : '等待摘要'}</small></div>`;
+  title.innerHTML = `<span class="ssa-floor-number">${record.floorIndex + 1}</span><div><p>第 ${record.floorIndex + 1} 楼 · ${record.isUser ? '玩家输入' : '角色回复'}</p><small>${record.status === 'skipped' ? '操作指令 · 本地保留' : record.status === 'ready' ? '剧情已入档' : record.status === 'processing' ? '正在更新记忆' : record.status === 'failed' ? '整理失败' : '等待入档'}</small></div>`;
   header.append(title);
   const badge = document.createElement('span');
   badge.className = 'ssa-state-badge';
-  badge.textContent = record.status === 'ready' ? (record.inputComplete === true ? '已摘要' : '待核对覆盖') : record.status === 'processing' ? '处理中' : record.status === 'failed' ? '失败' : '缺失';
+  badge.textContent = record.status === 'skipped' ? '免总结' : record.status === 'ready' ? (record.inputComplete === true ? '已摘要' : '待核对覆盖') : record.status === 'processing' ? '处理中' : record.status === 'failed' ? '失败' : '缺失';
   const disclosure = document.createElement('span');
   disclosure.className = 'ssa-floor-disclosure';
   disclosure.setAttribute('aria-hidden', 'true');
@@ -647,7 +667,7 @@ function makeFloorCard(record, expanded) {
     : record.status === 'processing'
       ? '正在调用摘要接口，请稍候……'
       : record.error || '这一楼还没有摘要。';
-  content.append(body);
+  if (record.status !== 'skipped') content.append(body);
 
   if (record.isUser && record.userText) {
     const source = document.createElement('section');
@@ -670,7 +690,7 @@ function makeFloorCard(record, expanded) {
   ]) if (detail) detailsRow.append(detail);
   content.append(detailsRow);
 
-  if (record.status !== 'processing') {
+  if (!['processing', 'skipped'].includes(record.status)) {
     const retry = document.createElement('button');
     retry.type = 'button';
     retry.className = 'ssa-text-button';
@@ -710,9 +730,10 @@ export function renderSnapshot(root, snapshot, { expandedFloorCount = 5, resetDi
   }
   const rollup = snapshot.rollup;
   root.querySelector('[data-role="rollup-text"]').textContent = rollup?.text || '还没有可用摘要。';
-  root.querySelector('[data-role="rollup-floor"]').textContent = `已摘要 ${rollup?.readyFloors ?? 0} / ${snapshot.totalFloors ?? snapshot.summaries.length} 楼`;
+  const skippedCount = snapshot.summaries.filter((record) => record.status === 'skipped').length;
+  root.querySelector('[data-role="rollup-floor"]').textContent = `已摘要 ${rollup?.readyFloors ?? 0} / ${(snapshot.totalFloors ?? snapshot.summaries.length) - skippedCount} 楼${skippedCount ? ` · ${skippedCount} 条操作指令免总结` : ''}`;
   root.querySelector('[data-role="rollup-token"]').textContent = `约 ${rollup?.tokenEstimate ?? 0} token`;
-  const missingCount = snapshot.summaries.filter((record) => ['missing', 'failed'].includes(record.status) || (record.status === 'ready' && record.inputComplete !== true)).length;
+  const missingCount = snapshot.summaries.filter((record) => ['missing', 'failed'].includes(record.status) || (record.status === 'ready' && (record.inputComplete !== true || record.memoryVersion !== 1))).length;
   const backfillStatus = root.querySelector('[data-role="backfill-status"]');
   if (backfillStatus) backfillStatus.textContent = `待补全 ${missingCount} 楼`;
 }
@@ -727,42 +748,6 @@ export function focusLatestFloor(root, { behavior = 'smooth' } = {}) {
   else main.scrollTop = top;
 }
 
-export function renderOptions(root, options, mode) {
-  const list = root.querySelector('[data-role="options-list"]');
-  list.replaceChildren();
-  options.forEach((option, index) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'ssa-option-card';
-    button.dataset.action = 'choose-option';
-    button.dataset.option = option;
-    const number = document.createElement('span');
-    number.textContent = String(index + 1).padStart(2, '0');
-    const copy = document.createElement('span');
-    const label = document.createElement('small');
-    label.textContent = MODE_NAMES[mode] ?? MODE_NAMES.guided;
-    const text = document.createElement('strong');
-    text.textContent = option;
-    copy.append(label, text);
-    button.append(number, copy);
-    list.append(button);
-  });
-}
-
-function appendResultList(container, title, items) {
-  if (!items?.length) return;
-  const section = document.createElement('section');
-  const heading = document.createElement('strong');
-  heading.textContent = title;
-  const list = document.createElement('ul');
-  for (const item of items) {
-    const row = document.createElement('li');
-    row.textContent = item;
-    list.append(row);
-  }
-  section.append(heading, list);
-  container.append(section);
-}
 
 export function renderPlayerProfile(root, profile) {
   const container = root.querySelector('[data-role="preference-profile"]');
@@ -974,6 +959,10 @@ export function collectStoryExperiences(root) {
 
 export function resetPreferenceTest(root) {
   for (const input of root.querySelectorAll('[data-quiz-id], [data-experience-id]')) input.checked = false;
+  if (['options', 'advance'].includes(legacy)) {
+    const label = legacy === 'options' ? '剧情选项' : '自主推进';
+    for (const group of root.querySelectorAll('.ssa-settings-group')) if (group.firstElementChild.textContent.startsWith(label)) group.open = true;
+  }
   const main = root.querySelector('.ssa-main');
   if (main) main.scrollTop = 0;
 }
@@ -1037,7 +1026,7 @@ export function syncSettings(root, settings, apiKey = '') {
     const value = settings[key];
     if (input.type === 'checkbox') input.checked = Boolean(value);
     else if (input.type === 'radio') input.checked = input.value === String(value ?? '');
-    else input.value = String(value ?? '');
+    else if (document.activeElement !== input) input.value = String(value ?? '');
   }
   for (const state of root.querySelectorAll('[data-switch-state-for]')) {
     const enabled = Boolean(settings[state.dataset.switchStateFor]);
@@ -1085,10 +1074,16 @@ export function setStatus(root, message, tone = 'normal') {
 }
 
 export function switchTab(root, tab) {
+  const legacy = tab;
+  tab = ({summary:'database', options:'settings', advance:'settings', npc:'database'})[tab] ?? tab;
   const subpage = tab === 'preference-test';
   root.classList.toggle('is-subpage', subpage);
   for (const button of root.querySelectorAll('[data-tab]')) button.classList.toggle('is-active', button.dataset.tab === tab);
   for (const page of root.querySelectorAll('[data-page]')) page.classList.toggle('is-active', page.dataset.page === tab);
+  if (['options', 'advance'].includes(legacy)) {
+    const label = legacy === 'options' ? '剧情选项' : '自主推进';
+    for (const group of root.querySelectorAll('.ssa-settings-group')) if (group.firstElementChild.textContent.startsWith(label)) group.open = true;
+  }
   const main = root.querySelector('.ssa-main');
   if (main) main.scrollTop = 0;
 }

@@ -124,8 +124,8 @@ test('summary prompts preserve player statements without making old statements p
   };
   await requestFloorSummary(provider, { rollingSummary: '', recentFloors: [] });
   await requestCompression(provider, '【玩家原文记录】玩家选择留下。', 7);
-  assert.match(prompts[0], /玩家 user 的原话必须准确记录/);
-  assert.match(prompts[0], /以更晚楼层作为当前状态/);
+  assert.match(prompts[0], /准确保留玩家 user 的原话含义及楼层顺序/);
+  assert.match(prompts[0], /以更晚楼层的明确更新为当前状态/);
   assert.match(prompts[1], /不得把任何单次表态永久化/);
   assert.doesNotMatch(prompts.join('\n'), /最高优先级/);
   assert.match(prompts[1], /时间线顺序以楼层编号为准/);

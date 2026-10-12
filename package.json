@@ -1,10 +1,10 @@
 {
   "name": "spring-story-archive",
-  "version": "0.5.7",
+  "version": "0.7.1",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check index.js && node --check core/privacy-payload.js && node --check core/api-client.js && node --check core/preference-quiz.js && node --check core/semantic-recall.js && node --check core/storage.js && node --check core/summary-engine.js && node --check core/story-context.js && node --check ui/view.js"
+    "check": "node --check index.js && node --check core/send-history.js && node --check ui/send-view.js && node --check ui/chat-options.js && node --check core/memory-database.js && node --check ui/memory-view.js && node --check core/api-profiles.js && node --check core/privacy-payload.js && node --check core/api-client.js && node --check core/preference-quiz.js && node --check core/semantic-recall.js && node --check core/storage.js && node --check core/summary-engine.js && node --check core/story-context.js && node --check ui/view.js"
   }
 }

@@ -16,7 +16,18 @@
 #spring_story_archive_root,
 #spring_story_archive_root * {
   box-sizing: border-box;
+  scrollbar-width: none;
 }
+
+#spring_story_archive_root::-webkit-scrollbar,
+#spring_story_archive_root *::-webkit-scrollbar { display: none; }
+
+.ssa-api-profile-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.ssa-memory-row { padding: 12px 0; border-bottom: 1px solid var(--ssa-stone); }
+.ssa-memory-row > summary { cursor: pointer; font-weight: 600; line-height: 1.7; overflow-wrap: anywhere; }
+.ssa-memory-row > small { display: block; margin: 10px 0; opacity: .7; }
+.ssa-memory-row textarea { width: 100%; resize: vertical; }
+.ssa-memory-row label { display: grid; gap: 6px; margin: 10px 0; }
 
 #spring_story_archive_root {
   color: var(--ssa-ink);
@@ -101,7 +112,7 @@
 .ssa-app {
   position: fixed;
   z-index: 3000;
-  top: 4vh;
+  top: max(4vh, calc(var(--topBarBlockSize, 0px) + 8px));
   right: 4vw;
   bottom: 4vh;
   width: min(980px, 92vw);
@@ -115,7 +126,7 @@
     var(--ssa-paper);
   box-shadow: var(--ssa-shadow);
   display: grid;
-  grid-template-rows: auto auto auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
   animation: ssa-enter .32s cubic-bezier(.2, .75, .25, 1);
 }
 
@@ -1111,7 +1122,7 @@
 .ssa-profile-card {
   position: relative;
   padding-left: 24px;
-  border-left: 4px solid var(--ssa-jade);
+  border: 1px solid rgba(82, 121, 108, .25);
 }
 
 .ssa-profile-details {
@@ -1225,7 +1236,7 @@
 .ssa-experience-option input:checked + span {
   border-color: var(--ssa-jade);
   background: #e5ece1;
-  box-shadow: inset 3px 0 0 var(--ssa-jade);
+  box-shadow: none;
 }
 
 .ssa-test-section > label {
@@ -1369,22 +1380,11 @@
   border-top: 3px solid var(--ssa-deep);
 }
 
-.ssa-npc-archive-intro::after {
-  content: "人物档案库";
-  position: absolute;
-  top: 17px;
-  right: 18px;
-  padding: 4px 8px;
-  border: 1px solid rgba(82, 121, 108, .3);
-  border-radius: 3px;
-  color: rgba(59, 88, 75, .58);
-  font-size: 9px;
-  letter-spacing: .16em;
-}
+
 
 .ssa-npc-card {
   position: relative;
-  border-left: 3px solid var(--ssa-moss);
+  border: 1px solid rgba(82, 121, 108, .25);
   background:
     linear-gradient(90deg, rgba(129, 155, 133, .06) 1px, transparent 1px) 0 0 / 28px 100%,
     var(--ssa-white);
@@ -1538,7 +1538,7 @@
 .ssa-notice {
   margin: 15px 0 0;
   padding: 11px 13px;
-  border-left: 2px solid var(--ssa-moss);
+  border: 1px solid rgba(82, 121, 108, .25);
   color: rgba(38, 61, 52, .68);
   background: rgba(129, 155, 133, .1);
   font-family: var(--ssa-font);
@@ -1606,12 +1606,12 @@
   }
 
   .ssa-app {
-    inset: 0;
+    inset: calc(var(--topBarBlockSize, 0px) + 8px) 0 0;
     width: 100vw;
-    height: 100dvh;
+    height: auto;
     border: 0;
     border-radius: 0;
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-rows: auto 1fr auto;
   }
 
   .ssa-app::after {
@@ -1650,7 +1650,7 @@
     left: 0;
     order: 5;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 0;
     padding: 0 0 env(safe-area-inset-bottom);
     border-top: 1px solid rgba(59, 88, 75, .18);
@@ -1904,8 +1904,12 @@
   }
 
   .ssa-footer {
-    display: none;
+    display: block;
+    padding: 8px 16px;
+    margin-bottom: calc(44px + env(safe-area-inset-bottom));
+    font-size: 12px;
   }
+  .ssa-footer > span:last-child { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1920,3 +1924,32 @@
     transition: none;
   }
 }
+
+/* Shared database, request history and compact settings surfaces. */
+.ssa-page-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px; }
+.ssa-page-heading h2 { margin:4px 0; }
+.ssa-settings-group { border-bottom:1px solid #d8d9d0; padding:16px 0; }
+.ssa-settings-group > summary { cursor:pointer; font-size:17px; font-weight:600; padding:8px 0; }
+.ssa-group-body { padding-top:16px; }
+.ssa-send-record { border:1px solid #d8d9d0; border-radius:12px; padding:16px; margin:12px 0; }
+.ssa-send-record > summary { cursor:pointer; display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; font-size:17px; list-style:none; }
+.ssa-send-record > summary::-webkit-details-marker { display:none; }
+.ssa-send-record > summary > small { grid-column:1 / -1; }
+.ssa-send-record > summary > span { font-size:15px; }
+.ssa-send-record > summary:focus-visible { outline:2px solid var(--ssa-jade); outline-offset:6px; }
+.ssa-send-record[open] > summary { padding-bottom:16px; margin-bottom:16px; border-bottom:1px solid #d8d9d0; }
+.ssa-send-record small { color:#667568; font-size:12px; }
+.ssa-send-record pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:14px; line-height:1.7; padding:12px; background:#f4f3ec; border-radius:8px; }
+.ssa-send-record details { margin:12px 0; }
+@font-face { font-family:"SSA New Shu Song"; src:url("assets/fonts/FZXSSJW.ttf") format("truetype"); font-style:normal; font-weight:400; font-display:swap; }
+.ssa-page[data-page="sending"] { font-family:"SSA New Shu Song"; font-size:16px; line-height:1.7; }
+.ssa-page[data-page="sending"] .ssa-page-heading h2 { margin:0; }
+.ssa-page[data-page="sending"] .ssa-muted { margin:8px 0 22px; font-size:15px; }
+.ssa-send-record h3 { font-family:var(--ssa-font); font-size:17px; margin:18px 0 8px; }
+.ssa-send-record p { overflow-wrap:anywhere; }
+.ssa-memory-facts { margin:10px 0; line-height:1.8; white-space:pre-wrap; }
+.ssa-memory-editor { margin:12px 0; }
+.ssa-chat-options { margin:12px 0 4px; padding:10px 0; border-top:1px solid var(--SmartThemeBorderColor,#a9b6a7); display:grid; gap:8px; scrollbar-width:none; }
+.ssa-chat-options button { text-align:left; color:inherit; background:transparent; border:1px solid var(--SmartThemeBorderColor,#a9b6a7); border-radius:8px; padding:10px 12px; font:inherit; cursor:pointer; white-space:normal; }
+.ssa-chat-options p { font-size:13px; margin:0; opacity:.8; }
+.ssa-chat-options::-webkit-scrollbar { display:none; }

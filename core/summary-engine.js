@@ -5,8 +5,10 @@ import {
   fingerprintSummaries,
   validSummaries,
   splitInputText,
-} from './privacy-payload.js';
-import { createProvider, requestCompression, requestFloorSummaries } from './api-client.js';
+  isControlMessage,
+} from './privacy-payload.js?v=0.7.1';
+import { createProvider, requestCompression, requestFloorSummaries } from './api-client.js?v=0.7.1';
+import { MEMORY_VERSION, buildMemoryDatabase, formatMemoryDatabase, memorySchemaForPrompt, validateMemoryChanges, applyNarrativeEdits } from './memory-database.js?v=0.7.1';
 
 function nowIso() {
   return new Date().toISOString();
@@ -26,6 +28,18 @@ function summaryKey(chatKey, floorIndex) {
 
 function checkpointKey(chatKey, throughFloor) {
   return `${chatKey}::checkpoint::${throughFloor}`;
+}
+
+function controlRecord(chatKey, floorIndex, message) {
+  return { key: summaryKey(chatKey, floorIndex), chatKey, floorIndex, messageFingerprint: fingerprintMessage(message, floorIndex),
+    ...messageMetadata(message), status: 'skipped', reason: 'control', summary: '', timeline: [], characters: [], relationships: [], clues: [], memoryChanges: [], error: '', updatedAt: nowIso() };
+}
+
+function previousReady(record) {
+  const ready = record?.status === 'ready' ? record : record?.previous;
+  if (!ready) return undefined;
+  const { previous, ...copy } = ready;
+  return copy;
 }
 
 function messageMetadata(message) {
@@ -117,6 +131,10 @@ export class SummaryEngine {
       const messageFingerprint = fingerprintMessage(chat[floorIndex], floorIndex);
       const metadata = messageMetadata(chat[floorIndex]);
       const current = byFloor.get(floorIndex);
+      if (isControlMessage(chat[floorIndex])) {
+        if (current?.status !== 'skipped' || current?.messageFingerprint !== messageFingerprint) await this.storage.putSummary(controlRecord(chatKey, floorIndex, chat[floorIndex]));
+        continue;
+      }
       if (!current || current.messageFingerprint !== messageFingerprint) {
         await this.storage.putSummary({
           key: summaryKey(chatKey, floorIndex),
@@ -189,7 +207,7 @@ export class SummaryEngine {
     const summaries = await this.storage.listSummaries(this.chatKey);
     if (revision !== this.chatRevision) return { busy: false, queuedCount: 0, remainingCount: 0, totalMissing: 0 };
     const missing = summaries
-      .filter((record) => ['missing', 'failed'].includes(record.status) || (record.status === 'ready' && record.inputComplete !== true))
+      .filter((record) => ['missing', 'failed'].includes(record.status) || (record.status === 'ready' && (record.inputComplete !== true || record.memoryVersion !== MEMORY_VERSION)))
       .filter((record) => !this.currentBatch.includes(record.floorIndex) && !this.queue.includes(record.floorIndex))
       .sort((left, right) => left.floorIndex - right.floorIndex);
     const batchSize = Math.min(20, Math.max(1, Number(limit) || 10));
@@ -208,6 +226,14 @@ export class SummaryEngine {
     const context = this.getContext();
     const message = context.chat?.[floorIndex];
     if (!message) throw new Error('这个楼层已经不存在。');
+    if (isControlMessage(message)) {
+      await this.storage.putSummary(controlRecord(this.chatKey, floorIndex, message));
+      await this.refreshRollup({ allowCompression: false });
+      await this.onChange();
+      return;
+    }
+    const old = (await this.storage.listSummaries(this.chatKey)).find((record) => record.floorIndex === floorIndex);
+    if (revision !== this.chatRevision) return;
     const metadata = messageMetadata(message);
     await this.storage.putSummary({
       key: summaryKey(this.chatKey, floorIndex),
@@ -216,6 +242,7 @@ export class SummaryEngine {
       messageFingerprint: fingerprintMessage(message, floorIndex),
       ...metadata,
       status: 'missing',
+      previous: previousReady(old),
       summary: '',
       characters: [],
       relationships: [],
@@ -297,11 +324,20 @@ export class SummaryEngine {
     const chatKey = this.chatKey;
     const revision = this.chatRevision;
     const isCurrent = () => this.chatRevision === revision;
+    for (const floorIndex of floorIndexes) {
+      if (!isCurrent()) return { skipped: true };
+      if (chatKey && isControlMessage(chat[floorIndex])) await this.storage.putSummary(controlRecord(chatKey, floorIndex, chat[floorIndex]));
+    }
     const batch = floorIndexes
-      .filter((floorIndex) => Number.isInteger(floorIndex) && chat[floorIndex])
+      .filter((floorIndex) => Number.isInteger(floorIndex) && chat[floorIndex] && !isControlMessage(chat[floorIndex]))
       .sort((left, right) => left - right);
-    if (!batch.length || !chatKey) return { skipped: true };
+    if (!batch.length || !chatKey) {
+      if (chatKey && isCurrent()) { await this.refreshRollup({ allowCompression: false }); await this.onChange(); }
+      return { skipped: true };
+    }
     const settings = this.getSettings();
+    const existing = await this.storage.listSummaries(chatKey);
+    if (!isCurrent()) return { skipped: true };
     const records = batch.map((floorIndex) => {
       const message = chat[floorIndex];
       return {
@@ -310,6 +346,7 @@ export class SummaryEngine {
         floorIndex,
         messageFingerprint: fingerprintMessage(message, floorIndex),
         ...messageMetadata(message),
+        previous: previousReady(existing.find((record) => record.floorIndex === floorIndex)),
       };
     });
     for (const record of records) {
@@ -364,6 +401,7 @@ export class SummaryEngine {
         await this.storage.putSummary({
           ...record,
           status: 'ready',
+          previous: undefined,
           inputComplete: true,
           ...summary,
           error: '',
@@ -396,21 +434,27 @@ export class SummaryEngine {
   }
 
   async requestCompleteSummaries(provider, chat, batch, rollingSummary, isCurrent) {
-    const makePayload = (inputChat, indexes) => buildSummaryBatchPayload({ chat: inputChat, floorIndexes: indexes, rollingSummary });
+    const memory = await this.getMemory({ throughFloor: batch[0] - 1 });
+    const makePayload = (inputChat, indexes) => {
+      const payload = buildSummaryBatchPayload({ chat: inputChat, floorIndexes: indexes, rollingSummary, inputTokenLimit: 5400 });
+      payload.memorySchema = memorySchemaForPrompt();
+      payload.currentMemory = formatMemoryDatabase(memory, { budget: 500, includeIds: true, query: batch.map((index) => chat[index]?.mes ?? '').join('\n') });
+      return payload;
+    };
     let payload;
     try { payload = makePayload(chat, batch); } catch { /* Full oversized floors are read in parts below. */ }
     if (payload) return requestFloorSummaries(provider, payload);
     const results = [];
     for (const floorIndex of batch) {
       const text = String(chat[floorIndex].mes ?? '');
-      const parts = splitInputText(text, (part) => JSON.stringify({ text: part }), 3500);
+      const parts = splitInputText(text, (part) => JSON.stringify({ text: part }), 2500);
       const summaries = [];
       const segments = parts.length ? parts : [''];
       for (const [partIndex, part] of segments.entries()) {
         if (!isCurrent()) throw new Error('聊天已切换，本次摘要已停止。');
         const inputChat = [...chat];
         inputChat[floorIndex] = { ...chat[floorIndex], mes: part };
-        const payload = buildSummaryBatchPayload({ chat: inputChat, floorIndexes: [floorIndex], rollingSummary, inputTokenLimit: 6200 });
+        const payload = makePayload(inputChat, [floorIndex]);
         Object.assign(payload.targetFloors[0], { part: partIndex + 1, parts: segments.length });
         const [summary] = await requestFloorSummaries(provider, payload);
         summaries.push(summary);
@@ -418,6 +462,8 @@ export class SummaryEngine {
       results.push({
         floor: floorIndex + 1,
         summary: summaries.map((item) => item.summary).join('\n'),
+        memoryVersion: MEMORY_VERSION,
+        memoryChanges: summaries.flatMap((item) => item.memoryChanges ?? []),
         ...Object.fromEntries(['timeline', 'characters', 'relationships', 'clues'].map((field) => [field, summaries.flatMap((item) => item[field])])),
       });
     }
@@ -429,7 +475,8 @@ export class SummaryEngine {
     const revision = this.chatRevision;
     if (!chatKey) return null;
     const settings = this.getSettings();
-    const ready = validSummaries(await this.storage.listSummaries(chatKey), this.getContext().chat);
+    const edits = await this.storage.getProfile(`${chatKey}::memory-edits`);
+    const ready = applyNarrativeEdits(validSummaries(await this.storage.listSummaries(chatKey), this.getContext().chat), edits?.edits);
     const checkpoints = (await this.storage.listCheckpoints(chatKey))
       .filter((checkpoint) => checkpoint.status === 'ready')
       .sort((left, right) => right.throughFloor - left.throughFloor);
@@ -544,16 +591,48 @@ export class SummaryEngine {
 
   async getSnapshot() {
     if (!this.chatKey) return { summaries: [], rollup: null, checkpoints: [] };
-    const [summaries, rollup, checkpoints] = await Promise.all([
+    const chatKey = this.chatKey, revision = this.chatRevision;
+    const [summaries, rollup, checkpoints, edits] = await Promise.all([
       this.storage.listSummaries(this.chatKey),
       this.storage.getRollup(this.chatKey),
       this.storage.listCheckpoints(this.chatKey),
+      this.storage.getProfile(`${chatKey}::memory-edits`),
     ]);
+    if (revision !== this.chatRevision) throw new Error('聊天已变化，请重新读取档案。');
     return {
+      memoryEdits: edits?.edits ?? [],
       summaries: summaries.sort((left, right) => left.floorIndex - right.floorIndex),
       rollup,
       checkpoints: checkpoints.sort((left, right) => right.throughFloor - left.throughFloor),
+      memory: await this.getMemory(),
     };
+  }
+
+  async getMemory(options = {}) {
+    const chatKey = this.chatKey;
+    const revision = this.chatRevision;
+    const chat = this.getContext().chat.map((message) => ({ ...message }));
+    const [records, edits] = await Promise.all([
+      this.storage.listSummaries(chatKey),
+      this.storage.getProfile(`${chatKey}::memory-edits`),
+    ]);
+    if (revision !== this.chatRevision) throw new Error('聊天已变化，请重新读取记忆。');
+    return buildMemoryDatabase(records, chat, edits?.edits ?? [], options);
+  }
+
+  async editMemory(change) {
+    const [valid] = validateMemoryChanges([change], { manual: true });
+    const chatKey = this.chatKey, revision = this.chatRevision;
+    if (!chatKey) throw new Error('请先打开一个聊天。');
+    const key = `${chatKey}::memory-edits`;
+    const profile = await this.storage.getProfile(key);
+    if (revision !== this.chatRevision) throw new Error('聊天已切换，请重新保存。');
+    const edit = { ...valid, floorIndex: Math.max(0, this.getContext().chat.length - 1) };
+    const edits = (profile?.edits ?? []).filter((item) => !(item.table === edit.table && item.id === edit.id && item.floorIndex === edit.floorIndex));
+    await this.storage.putProfile({ key, chatKey, kind: 'memory-edits', edits: [...edits, edit] });
+    if (revision !== this.chatRevision) return;
+    await this.refreshRollup({ allowCompression: false });
+    await this.onChange();
   }
 
   waitForIdle() {

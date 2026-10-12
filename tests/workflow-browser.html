@@ -1,0 +1,41 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>春序 · 本地流程验证</title>
+<link rel="stylesheet" href="../style.css">
+<style>:root{--topBarBlockSize:42px}body{margin:0;background:#f7f5ed;color:#203c30;font:16px/1.6 system-ui}html,body{scrollbar-width:none}::-webkit-scrollbar{display:none}.hostbar{height:42px;background:#2e463b;color:white;position:sticky;top:0;z-index:3005}#chat{padding:16px}.mes{padding:14px 0;border-bottom:1px solid #ccc}textarea{box-sizing:border-box;width:95%;margin:8px}button{padding:8px;margin:4px}#receipt{font-size:13px;padding:12px}</style>
+<body><div class="hostbar">本地模拟酒馆 · 不调用真实模型</div><button id="next">模拟下一轮回复</button><button id="swipe">模拟重新生成</button><button id="stop">模拟停止请求</button><p id="receipt">等待测试</p><div id="chat"></div><textarea id="send_textarea" aria-label="酒馆聊天输入框"></textarea>
+<script type="module">
+if (new URLSearchParams(location.search).has('mobile')) {
+ document.body.innerHTML='<iframe title="手机流程验证" src="workflow-browser.html" style="display:block;width:390px;height:100vh;border:0;margin:auto"></iframe>';
+} else {
+ const listeners = new Map(), prompts = new Map();
+ const names=['APP_READY','GENERATE_AFTER_DATA','MESSAGE_SENT','MESSAGE_RECEIVED','GENERATION_ENDED','GENERATION_STOPPED','MESSAGE_EDITED','MESSAGE_SWIPED','MESSAGE_DELETED','CHAT_CHANGED'];
+ const settings=JSON.parse(localStorage.getItem('ssa-workflow-settings') || 'null') || {'spring-story-archive':{optionsEnabled:true,optionCount:4,optionSource:'current',summarySource:'current'}};
+ const chat=JSON.parse(localStorage.getItem('ssa-workflow-chat') || 'null') || [{name:'林素',is_user:false,mes:'雨夜，林素在旧宅档案室持有登记簿，答应核对被修改的日期。'}];
+ const save=()=>localStorage.setItem('ssa-workflow-chat',JSON.stringify(chat));
+ const emit=async(name,...args)=>{for(const fn of listeners.get(name)||[]) await fn(...args);};
+ const render=()=>{const area=document.querySelector('#chat');area.replaceChildren();chat.forEach((message,index)=>{const row=document.createElement('div');row.className='mes';row.setAttribute('mesid',index);const block=document.createElement('div');block.className='mes_block';const body=document.createElement('div');body.className='mes_text';body.textContent=message.mes;block.append(body);row.append(block);area.append(row);});save();};
+ const context={chat,extensionSettings:settings,getCurrentChatId:()=> 'workflow-test',saveSettingsDebounced:()=>localStorage.setItem('ssa-workflow-settings',JSON.stringify(settings)),eventTypes:Object.fromEntries(names.map(name=>[name,name])),eventSource:{on(name,fn){listeners.set(name,[...(listeners.get(name)||[]),fn]);},once(){},off(name,fn){listeners.set(name,(listeners.get(name)||[]).filter(item=>item!==fn));},makeLast(){}},setExtensionPrompt:(key,text)=>prompts.set(key,text),stopGeneration(){},
+ async generateRaw({prompt,systemPrompt}) {
+   const payload=JSON.parse(prompt.replace(/^user:\s*/,''));
+   if(systemPrompt.includes('互动叙事选项')) {
+     const matched=payload.currentMemory?.includes('林素');
+     document.querySelector('#receipt').textContent=`选项请求已读取记忆：${matched ? '林素' : '无人物'}；写作要求：${payload.optionWritingRequirements || '未填写'}`;
+     return JSON.stringify({options:['追问登记簿上被修改的日期','查看西廊留下的水痕','去找沈砚核对线索','请林素保管好登记簿']});
+   }
+   return JSON.stringify({floors:(payload.targetFloors||[]).map(({floor})=>({floor,summary:'林素在档案室核对登记簿。',changes:[{table:'scene',id:'current',values:{time:'雨夜',location:'旧宅档案室'}},{table:'characters',id:'林素',values:{name:'林素',location:'旧宅档案室',state:'核对登记簿'}},{table:'inventory',id:'登记簿',values:{name:'登记簿',owner:'林素',quantity:'1'}}]}))});
+ }};
+ globalThis.SillyTavern={getContext:()=>context};
+ render(); await import('../index.js?v=0.7.1');
+ const generate=async(type,stop=false)=>{
+   document.querySelector('#receipt').textContent='正在模拟宿主生成流程';
+   if(type!=='swipe'){chat.push({name:'玩家',is_user:true,mes:'请林素说明登记簿的改动。'});render();await emit('MESSAGE_SENT',chat.length-1);}
+   const copy=chat.map((message,index)=>({...message,index}));let aborted=false;
+   await globalThis.springStoryArchiveSemanticRecallInterceptor(copy,32000,()=>{aborted=true;},type);
+   await emit('GENERATE_AFTER_DATA',{prompt:[...prompts.values(),...copy.map(row=>row.mes)].join('\n')},false);
+   if(stop||aborted){await emit('GENERATION_STOPPED');return;}
+   const reply={name:'林素',is_user:false,mes:'林素在旧宅档案室翻开登记簿，指着被修改的日期。'};
+   if(type==='swipe'){reply.swipe_id=(chat.at(-1).swipe_id||0)+1;chat[chat.length-1]=reply;}else chat.push(reply);
+   render();await emit('MESSAGE_RECEIVED',chat.length-1);await emit('GENERATION_ENDED',chat.length);
+ };
+ for(const [id,type,stop] of [['next','normal',false],['swipe','swipe',false],['stop','normal',true]]) document.getElementById(id).onclick=()=>generate(type,stop).catch(error=>{document.querySelector('#receipt').textContent=error.stack;});
+}
+</script></body></html>

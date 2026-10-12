@@ -1,4 +1,4 @@
-import { RAW_FLOOR_LIMIT, validSummaries } from './privacy-payload.js';
+import { RAW_FLOOR_LIMIT, validSummaries } from './privacy-payload.js?v=0.7.1';
 
 function normalizeText(value) {
   return String(value ?? '').replace(/\u0000/g, '').trim();
@@ -150,9 +150,17 @@ export class SemanticRecallService {
     this.getCredentials = getCredentials;
   }
 
-  async sync(chatKey, summaries, { force = false } = {}) {
-    const credentials = this.getCredentials();
+  assertCurrent(credentials) {
+    const current = this.getCredentials();
+    if (['profileId', 'endpoint', 'apiKey', 'embeddingModel'].some((key) => current[key] !== credentials[key])) {
+      throw new Error('API 配置已变化，请重新执行语义回忆。');
+    }
+  }
+
+  async sync(chatKey, summaries, { force = false, credentials = this.getCredentials() } = {}) {
     const model = normalizeText(credentials.embeddingModel);
+    const endpoint = embeddingsEndpointForChatEndpoint(credentials.endpoint);
+    const profileId = credentials.profileId ?? '';
     if (!model) throw new Error('请选择嵌入模型。');
     const ready = (summaries ?? []).filter((record) => record.status === 'ready' && normalizeText(record.summary));
     const existing = await this.storage.listVectors(chatKey);
@@ -168,7 +176,7 @@ export class SemanticRecallService {
       const unchanged = !force
         && current?.messageFingerprint === record.messageFingerprint
         && current?.documentFingerprint === documentFingerprint
-        && current?.model === model;
+        && current?.model === model && current?.endpoint === endpoint && current?.profileId === profileId;
       return unchanged ? null : { record, sourceText, documentFingerprint };
     }).filter(Boolean);
     if (pending.length) {
@@ -177,7 +185,9 @@ export class SemanticRecallService {
         model,
         input: pending.map((item) => item.sourceText),
       });
+      this.assertCurrent(credentials);
       for (let index = 0; index < pending.length; index += 1) {
+        this.assertCurrent(credentials);
         const { record, sourceText, documentFingerprint } = pending[index];
         await this.storage.putVector({
           key: `${chatKey}::vector::floor::${record.floorIndex}`,
@@ -188,27 +198,33 @@ export class SemanticRecallService {
           sourceText,
           embedding: embeddings[index],
           model,
+          endpoint,
+          profileId,
           isUser: Boolean(record.isUser),
           updatedAt: new Date().toISOString(),
         });
       }
     }
-    return this.storage.listVectors(chatKey);
+    this.assertCurrent(credentials);
+    return (await this.storage.listVectors(chatKey)).filter((row) => row.model === model && row.endpoint === endpoint && row.profileId === profileId);
   }
 
   async recall({ chatKey, summaries, chat, targetFloorIndex, topK, threshold, recentRawFloorLimit = RAW_FLOOR_LIMIT, force = false }) {
+    const credentials = { ...this.getCredentials() };
     summaries = validSummaries(summaries, chat).filter((record) => record.floorIndex <= targetFloorIndex);
-    const vectors = await this.sync(chatKey, summaries, { force });
+    const vectors = await this.sync(chatKey, summaries, { force, credentials });
+    this.assertCurrent(credentials);
     const rawLimit = Math.max(0, Math.min(RAW_FLOOR_LIMIT, Math.floor(Number(recentRawFloorLimit) || 0)));
     const query = rawLimit > 0
       ? buildRecallQuery(chat, targetFloorIndex, rawLimit)
       : buildRecallSummaryQuery(summaries, targetFloorIndex, 2);
     if (!query) return { indexedCount: vectors.length, records: [], prompt: '' };
     const [queryEmbedding] = await callOpenAiCompatibleEmbeddings({
-      ...this.getCredentials(),
-      model: this.getCredentials().embeddingModel,
+      ...credentials,
+      model: credentials.embeddingModel,
       input: [query],
     });
+    this.assertCurrent(credentials);
     const records = rankRecallMemories(vectors, queryEmbedding, {
       latestFloorIndex: targetFloorIndex,
       topK,

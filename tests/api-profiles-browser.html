@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>春序档案 · API 配置交互验证</title>
+<link rel="stylesheet" href="../style.css">
+<style>:root{--topBarBlockSize:42px}body{margin:0;background:#314d40}#receipt{position:fixed;bottom:4px;left:4px;color:white;font:12px system-ui;z-index:2147483647;pointer-events:none}html,body{scrollbar-width:none}::-webkit-scrollbar{display:none}</style>
+<div style="position:fixed;top:0;left:0;right:0;height:42px;background:#222;color:white;z-index:3005">模拟酒馆顶部工具栏</div><output id="receipt">本地模拟接口，不调用外部模型</output>
+<script type="module">
+  if (new URLSearchParams(location.search).has('mobile')) {
+    document.body.innerHTML = '<iframe title="手机交互验证" src="api-profiles-browser.html" style="display:block;width:390px;height:844px;max-height:100vh;border:0;margin:auto"></iframe>';
+  } else {
+    const events = new Map();
+    const settings = JSON.parse(localStorage.getItem('ssa-test-host-settings') || 'null') || {
+      'spring-story-archive': { summarySource: 'extra', extraEndpoint: `${location.origin}/mock/a/chat/completions`, extraModel: 'model-a' },
+    };
+    if (!localStorage.getItem('spring-story-archive:extra-api-profiles:v1')) sessionStorage.setItem('spring-story-archive:extra-api-key', 'demo-a');
+    const context = {
+      extensionSettings: settings, chat: [{ name: '测试角色', mes: '今天去图书馆。', is_user: false }, { name: '玩家', mes: '好的。', is_user: true }],
+      getCurrentChatId: () => 'api-profile-test', saveSettingsDebounced: () => localStorage.setItem('ssa-test-host-settings', JSON.stringify(settings)),
+      eventTypes: { APP_READY: 'ready' }, eventSource: { on: (name, cb) => events.set(name, cb), once() {}, off() {} }, setExtensionPrompt() {},
+    };
+    globalThis.SillyTavern = { getContext: () => context };
+    globalThis.fetch = async (url, init = {}) => {
+      const address = new URL(url, location.href);
+      if (address.origin !== location.origin || !address.pathname.startsWith('/mock/')) throw new Error('测试页面只允许本地模拟接口。');
+      const name = address.pathname.split('/')[2];
+      if (address.pathname.endsWith('/models')) return Response.json({ data: [{ id: `model-${name}` }, { id: `embed-${name}` }] });
+      const body = JSON.parse(init.body);
+      document.querySelector('#receipt').textContent = `请求：${name} · 模型：${body.model} · 配套密钥：${init.headers.Authorization === `Bearer demo-${name}` ? '正确' : '不匹配'}`;
+      let content = 'OK';
+      try { const payload = JSON.parse(body.messages.at(-1).content); content = JSON.stringify({ floors: payload.targetFloors.map(({ floor }) => ({ floor, summary: '林素在图书馆找到登记簿。', changes: [{table:'scene',id:'current',values:{location:'图书馆',situation:'找到登记簿'}},{table:'characters',id:'林素',values:{name:'林素',state:'持有登记簿'}}] })) }); } catch {}
+      return Response.json({ choices: [{ message: { content } }] });
+    };
+    await import('../index.js?v=0.7.1');
+  }
+</script></html>
