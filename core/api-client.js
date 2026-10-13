@@ -82,22 +82,58 @@ export async function listOpenAiCompatibleModels({ endpoint, apiKey, signal, fet
   return [...new Set(models)].sort((left, right) => left.localeCompare(right));
 }
 
-export async function callOpenAiCompatible({ endpoint, apiKey, model, messages, maxTokens = 700, signal, fetchImpl = fetch }) {
-  const response = await fetchImpl(ensureEndpoint(endpoint), {
+// Accept the same address SillyTavern takes (…/v1) as well as the full
+// …/chat/completions address.
+export function chatCompletionsUrl(endpoint) {
+  const url = new URL(ensureEndpoint(endpoint));
+  const path = url.pathname.replace(/\/+$/, '');
+  if (!/\/chat\/completions$/i.test(path)) url.pathname = `${path}/chat/completions`.replace(/\/{2,}/g, '/');
+  return url.href;
+}
+
+export function apiBaseUrl(endpoint) {
+  return chatCompletionsUrl(endpoint).replace(/\/chat\/completions(?=$|[?#])/i, '');
+}
+
+// When the browser cannot reach the API directly (blocked by CORS), send the
+// same request through SillyTavern's own server, as SillyTavern does.
+async function viaSillyTavern(proxy, { endpoint, apiKey, body, signal }) {
+  const key = String(apiKey ?? '').trim();
+  return proxy('/api/backends/chat-completions/generate', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(String(apiKey ?? '').trim() ? { Authorization: `Bearer ${String(apiKey).trim()}` } : {}),
-    },
     body: JSON.stringify({
-      model: String(model ?? '').trim(),
-      messages,
-      temperature: 0.25,
-      max_tokens: maxTokens,
-      stream: false,
+      ...body,
+      chat_completion_source: 'custom',
+      custom_url: apiBaseUrl(endpoint),
+      ...(key ? { custom_include_headers: `Authorization: ${JSON.stringify(`Bearer ${key}`)}` } : {}),
     }),
     signal,
   });
+}
+
+export async function callOpenAiCompatible({ endpoint, apiKey, model, messages, maxTokens = 700, signal, fetchImpl = fetch, proxy = null }) {
+  const body = {
+    model: String(model ?? '').trim(),
+    messages,
+    temperature: 0.25,
+    max_tokens: maxTokens,
+    stream: false,
+  };
+  let response;
+  try {
+    response = await fetchImpl(chatCompletionsUrl(endpoint), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(String(apiKey ?? '').trim() ? { Authorization: `Bearer ${String(apiKey).trim()}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    if (!proxy || error?.name === 'AbortError') throw error;
+    response = await viaSillyTavern(proxy, { endpoint, apiKey, body, signal });
+  }
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 300);
     throw new Error(`额外 API 返回 ${response.status}${detail ? `：${detail}` : ''}`);
@@ -107,6 +143,11 @@ export async function callOpenAiCompatible({ endpoint, apiKey, model, messages, 
   const content = data?.choices?.[0]?.message?.content;
   if (typeof content !== 'string' || !content.trim()) throw new Error('额外 API 没有返回正文。');
   return content;
+}
+
+function sillyTavernProxy(context) {
+  if (typeof context?.getRequestHeaders !== 'function') return null;
+  return (url, init) => fetch(url, { ...init, headers: { ...context.getRequestHeaders(), 'Content-Type': 'application/json' } });
 }
 
 export function createProvider({ source, context, extra, signal }) {
@@ -127,7 +168,7 @@ export function createProvider({ source, context, extra, signal }) {
       return result;
     }
     if (source === 'extra') {
-      return callOpenAiCompatible({ ...extra, messages, maxTokens, signal });
+      return callOpenAiCompatible({ ...extra, messages, maxTokens, signal, proxy: sillyTavernProxy(context) });
     }
     throw new Error(`未知 API 来源：${source}`);
   };

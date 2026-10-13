@@ -15,7 +15,6 @@ import { renderOverview } from './ui/overview-view.js?v=0.7.2';
 import { renderPromptViewer, selectRecord, filterPromptRows } from './ui/prompt-view.js?v=0.7.2';
 import { openApiProfiles } from './core/api-profiles.js?v=0.7.2';
 import {
-  callOpenAiCompatible,
   createProvider,
   listOpenAiCompatibleModels,
   requestNextPlan,
@@ -85,6 +84,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   uiTheme: 'chunlai',
   heroArt: 'night',
   heroImageUrl: '',
+  setupDismissed: false,
   advanceModules: null,
   preferenceGenres: [],
   preferenceTastes: {},
@@ -294,6 +294,41 @@ function refreshApiProfiles() {
   refreshSlotSelectors();
   syncSettings(root, getSettings(), getApiKey());
   renderOptionSlots(root, getSettings().optionSlots ?? []);
+  updateSetupCard();
+}
+
+// First run: a small card on the home page asks for the organizing API until
+// one is connected or the player chooses SillyTavern's current API.
+function updateSetupCard() {
+  const card = root?.querySelector('[data-role="setup-card"]');
+  if (!card || !apiProfiles) return;
+  const settings = getSettings();
+  card.hidden = Boolean(settings.setupDismissed || settings.organizeProfileId);
+}
+
+async function setupConnect() {
+  const error = root.querySelector('[data-role="setup-error"]');
+  const button = root.querySelector('[data-action="setup-connect"]');
+  error.hidden = true;
+  button.disabled = true;
+  button.textContent = '正在连接……';
+  try {
+    await testExtraApi();
+    const settings = getSettings();
+    settings.organizeProfileId = apiProfiles.active().id;
+    settings.setupDismissed = true;
+    saveSettings();
+    refreshSlotSelectors();
+    syncSettings(root, getSettings(), getApiKey());
+    updateSetupCard();
+    setStatus(root, '已连上，之后每楼自动整理', 'ok');
+  } catch (caught) {
+    error.textContent = `没连上：${caught.message}`;
+    error.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = '连接';
+  }
 }
 
 function onApiProfileChanged() {
@@ -1396,21 +1431,23 @@ function chooseOption(text) {
 
 async function testExtraApi() {
   const profileId = apiProfiles.active().id;
-  setStatus(root, '正在测试额外 API……');
-  const result = await callOpenAiCompatible({
-    ...getExtraCredentials(),
-    maxTokens: 20,
+  const profile = apiProfiles.active();
+  setStatus(root, `正在测试“${profile.name}”……`);
+  const provider = createProvider({ source: 'extra', context: getContext(), extra: { endpoint: profile.endpoint, apiKey: profile.apiKey, model: profile.model } });
+  const result = await provider({
+    maxTokens: 400,
     messages: [
       { role: 'system', content: '只回复 OK。' },
-      { role: 'user', content: '连接测试，不包含聊天内容。' },
+      { role: 'user', content: '连接测试。' },
     ],
   });
-  if (profileId === apiProfiles.active().id) setStatus(root, `额外 API 已连接：${result.slice(0, 30)}`);
+  if (profileId === apiProfiles.active().id) setStatus(root, `“${profile.name}”已连通：${result.slice(0, 30)}`, 'ok');
 }
 
 async function refreshExtraModels({ quiet = false } = {}) {
   const revision = ++modelFetchRevision;
-  const credentials = getExtraCredentials();
+  const editing = apiProfiles.active();
+  const credentials = { endpoint: editing.endpoint, apiKey: editing.apiKey, model: editing.model };
   if (!String(credentials.endpoint ?? '').trim()) {
     renderModelOptions(root, [], '填写接口地址后会自动读取可用模型。');
     if (!quiet) setStatus(root, '请先填写额外 API 地址', 'warning');
@@ -1421,6 +1458,14 @@ async function refreshExtraModels({ quiet = false } = {}) {
     const models = await listOpenAiCompatibleModels(credentials);
     if (revision !== modelFetchRevision || !root) return [];
     const settings = getSettings();
+    if (!String(apiProfiles.active().model ?? '').trim()) {
+      const chatModel = models.find((model) => !/embed(?:ding)?|whisper|tts|dall-e|image|moderation/i.test(model));
+      if (chatModel) {
+        settings.extraModel = chatModel;
+        apiProfiles.update({ model: chatModel });
+        saveSettings();
+      }
+    }
     if (!String(settings.recallEmbeddingModel ?? '').trim()) {
       const embeddingModel = models.find((model) => /embed(?:ding)?/i.test(model));
       if (embeddingModel) {
@@ -1516,6 +1561,14 @@ async function handleAction(action, button) {
     return;
   }
   if (action === 'save-push-plan' || action === 'push-skip' || action === 'push-reroll') return editPush(action);
+  if (action === 'setup-connect') return setupConnect();
+  if (action === 'setup-skip') {
+    getSettings().setupDismissed = true;
+    saveSettings();
+    updateSetupCard();
+    setStatus(root, '先用酒馆当前的 API 整理；随时可以在“设置 › API 接口”里换');
+    return;
+  }
   if (action === 'generate-options') return generateOptions();
   if (action === 'choose-option') return chooseOption(button.dataset.option ?? '');
   if (action === 'open-preference-test') {
@@ -1736,6 +1789,15 @@ function bindUi() {
     if (!input) return;
     void handleSettingChange(input).catch((error) => setStatus(root, error.message, 'error'));
   });
+  // Save the profile name when leaving the field too (some phone keyboards
+  // only commit composed text on blur).
+  root.addEventListener('focusout', (event) => {
+    if (!event.target.matches?.('[data-api-profile="name"]')) return;
+    try {
+      apiProfiles.update({ name: event.target.value });
+      refreshApiProfiles();
+    } catch (error) { setStatus(root, error.message, 'error'); }
+  });
   root.addEventListener('input', (event) => {
     if (event.target.matches('[data-role="prompt-search"]')) { filterPromptRows(root, event.target.value); return; }
     if (event.target.matches('[data-slot-field]')) {
@@ -1858,6 +1920,7 @@ async function initialize() {
     }
     await switchCurrentChat({ queueMissing: false });
     syncSettings(root, getSettings(), getApiKey());
+    updateSetupCard();
     if (getSettings().extraEndpoint) scheduleModelRefresh();
   } catch (error) {
     initialized = false;

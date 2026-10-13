@@ -2906,3 +2906,24 @@
 @media (prefers-reduced-motion: reduce) { #spring_story_archive_root.is-open .ssa-app.is-entering { animation: none; } }
 #spring_story_archive_root .ssa-header.ssa-hero { touch-action: none; user-select: none; }
 #spring_story_archive_root .ssa-header.ssa-hero { z-index: auto; }
+
+/* First-run card: connect the organizing API */
+#spring_story_archive_root .ssa-setup { display: grid; gap: 10px; margin: 0 0 24px; padding: 0 0 20px; border-bottom: 1px solid var(--ssa-border-soft); }
+#spring_story_archive_root .ssa-setup[hidden] { display: none; }
+#spring_story_archive_root .ssa-setup-title { margin: 0; color: var(--ssa-ink); font-family: var(--ssa-serif); font-size: 19px; font-weight: 400; letter-spacing: .08em; }
+#spring_story_archive_root .ssa-setup-note { margin: 0 0 4px; color: var(--ssa-muted); font-size: 13px; }
+#spring_story_archive_root .ssa-setup label { display: grid; gap: 4px; color: var(--ssa-mid); font-size: 13px; letter-spacing: .05em; }
+#spring_story_archive_root .ssa-setup input {
+  min-height: 40px; padding: 8px 11px; color: var(--ssa-ink); border: 1px solid var(--ssa-border-soft); border-radius: var(--ssa-r-md);
+  background: var(--ssa-paper-strong); font-size: 14.5px;
+}
+#spring_story_archive_root .ssa-setup-error { margin: 0; color: var(--ssa-danger); font-size: 13px; overflow-wrap: anywhere; }
+#spring_story_archive_root .ssa-setup-actions { display: flex; align-items: center; gap: 18px; margin-top: 4px; }
+#spring_story_archive_root .ssa-setup-actions .ssa-primary-button { min-width: 112px; min-height: 38px; }
+/* API editor: profile switcher on one line */
+#spring_story_archive_root .ssa-api-profile-bar { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; margin-bottom: 4px; }
+#spring_story_archive_root .ssa-api-profile-bar select { min-height: 36px; }
+#spring_story_archive_root .ssa-api-editor > label { display: grid; gap: 4px; }
+#spring_story_archive_root .ssa-page > .ssa-page-heading:first-child .ssa-page-note { display: none; }
+#spring_story_archive_root .ssa-page > .ssa-page-heading:first-child:not(:has(button)) { display: none; }
+#spring_story_archive_root .ssa-api-bar-label { margin: 0 0 4px; color: var(--ssa-mid); font-size: 13px; letter-spacing: .05em; }

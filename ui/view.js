@@ -207,6 +207,18 @@ export function createArchiveShell() {
           </div>
         </section>
         <section class="ssa-page is-active" data-page="sending">
+          <section class="ssa-setup" data-role="setup-card" hidden aria-label="连接整理接口">
+            <h3 class="ssa-setup-title">先连上整理用的接口</h3>
+            <p class="ssa-setup-note">春序每楼整理一次剧情，用这里的接口。连上之后就不用再管了。</p>
+            <label>接口地址<input type="url" inputmode="url" autocomplete="off" placeholder="https://…/v1" data-setting="extraEndpoint"></label>
+            <label>API Key<input type="password" autocomplete="new-password" placeholder="sk-…" data-secret="extraApiKey"></label>
+            <label>模型<input type="text" list="ssa-extra-model-list" autocomplete="off" placeholder="填好上面两项后自动读取" data-setting="extraModel"></label>
+            <p class="ssa-setup-error" data-role="setup-error" hidden></p>
+            <div class="ssa-setup-actions">
+              <button class="ssa-primary-button" type="button" data-action="setup-connect">连接</button>
+              <button class="ssa-text-button" type="button" data-action="setup-skip">先用酒馆当前的 API</button>
+            </div>
+          </section>
           <section class="ssa-overview" data-role="overview" aria-label="当前状态" aria-live="polite"></section>
           <section class="ssa-push" data-role="push-card" aria-label="下一轮推进" hidden></section>
           <section class="ssa-round" data-role="prompt-viewer" aria-label="实际发出的提示词"></section>
@@ -266,7 +278,60 @@ export function createArchiveShell() {
 
         <section class="ssa-page" data-page="settings">
           <div class="ssa-page-heading"><div><h2>设置</h2><p class="ssa-page-note">修改后自动保存</p></div></div>
-<details class="ssa-settings-group"><summary><span>外观</span><small>换一套色卡</small></summary><div class="ssa-group-body">
+<details class="ssa-settings-group" data-group="api"><summary><span>API 接口</span><small>整理用一个，向量用一个</small></summary><div class="ssa-group-body">          <article class="ssa-paper-card ssa-slot-card">
+            <div class="ssa-slot-grid">
+              <label>整理用
+                <select data-setting="organizeProfileId"><option value="">酒馆当前 API</option></select>
+                <small>每楼一次：摘要、人物物品、你的话、NPC</small>
+              </label>
+              <label>向量用
+                <select data-setting="vectorProfileId"></select>
+                <small>生成嵌入、查找往事</small>
+              </label>
+            </div>
+          </article>
+          <article class="ssa-paper-card ssa-api-editor">
+            <p class="ssa-api-bar-label">编辑配置</p>
+            <div class="ssa-api-profile-bar">
+              <select data-api-profile="select" aria-label="选择配置"><option value="">默认配置</option></select>
+              <button class="ssa-secondary-button" type="button" data-action="add-api-profile">新建</button>
+              <button class="ssa-secondary-button" type="button" data-action="delete-api-profile">删除</button>
+            </div>
+            <div data-role="delete-api-confirm" hidden>
+              <p>删除当前配置及其保存的密钥？</p>
+              <div class="ssa-api-profile-actions">
+                <button class="ssa-secondary-button" type="button" data-action="confirm-delete-api">确认删除</button>
+                <button class="ssa-secondary-button" type="button" data-action="cancel-delete-api">取消</button>
+              </div>
+            </div>
+            <label>名称
+              <input type="text" autocomplete="off" placeholder="例如 主用接口" data-api-profile="name">
+            </label>
+            <label>接口地址
+              <input type="url" autocomplete="off" inputmode="url" placeholder="https://…/v1" data-setting="extraEndpoint">
+              <small>和酒馆里填的一样，填到 /v1 就行。</small>
+            </label>
+            <label>API Key
+              <input type="password" autocomplete="new-password" placeholder="sk-…" data-secret="extraApiKey">
+            </label>
+            <label>模型
+              <div class="ssa-input-action-row">
+                <input type="text" list="ssa-extra-model-list" autocomplete="off" placeholder="填好地址和 Key 后自动读取" data-setting="extraModel">
+                <button class="ssa-secondary-button" type="button" data-action="refresh-models">读取</button>
+              </div>
+              <datalist id="ssa-extra-model-list" data-role="extra-model-list"></datalist>
+              <small data-role="model-list-status">填好地址和 Key 后自动读取可用模型。</small>
+            </label>
+            <label>嵌入模型（向量用）
+              <input type="text" list="ssa-embedding-model-list" autocomplete="off" placeholder="例如 text-embedding-3-small" data-setting="recallEmbeddingModel">
+              <datalist id="ssa-embedding-model-list" data-role="embedding-model-list"></datalist>
+              <small>选为“向量用”的配置才需要填。</small>
+            </label>
+            <button class="ssa-secondary-button" type="button" data-action="test-extra-api">测试连接</button>
+            <small class="ssa-muted">配置和密钥保存在这个浏览器里。</small>
+          </article>
+
+</div></details><details class="ssa-settings-group"><summary><span>外观</span><small>换一套色卡</small></summary><div class="ssa-group-body">
           <fieldset class="ssa-theme-picker">
             <legend class="ssa-visually-hidden">色卡</legend>
             ${UI_THEMES.map((theme) => `
@@ -420,63 +485,7 @@ export function createArchiveShell() {
             </label>
             <button class="ssa-primary-button ssa-wide-button" type="button" data-action="generate-npc">立即生成 NPC 并存入档案</button>
           </article>
-</div></details><details class="ssa-settings-group" data-group="api"><summary><span>API 接口</span><small>整理用一个，向量用一个</small></summary><div class="ssa-group-body">          <article class="ssa-paper-card ssa-slot-card">
-            <div class="ssa-slot-grid">
-              <label>整理用
-                <select data-setting="organizeProfileId"><option value="">酒馆当前 API</option></select>
-                <small>每楼一次：摘要、人物物品、你的话、NPC</small>
-              </label>
-              <label>向量用
-                <select data-setting="vectorProfileId"></select>
-                <small>只用来生成嵌入、查找往事</small>
-              </label>
-            </div>
-          </article>
-          <article class="ssa-paper-card">
-            <h3 class="ssa-subheading">编辑配置</h3>
-            <label>选择要编辑的配置
-              <select data-api-profile="select"><option value="">默认配置</option></select>
-            </label>
-            <div class="ssa-api-profile-actions">
-              <button class="ssa-secondary-button" type="button" data-action="add-api-profile">新建配置</button>
-              <button class="ssa-secondary-button" type="button" data-action="delete-api-profile">删除此配置</button>
-            </div>
-            <div data-role="delete-api-confirm" hidden>
-              <p>删除当前配置及其保存的密钥？</p>
-              <div class="ssa-api-profile-actions">
-                <button class="ssa-secondary-button" type="button" data-action="confirm-delete-api">确认删除</button>
-                <button class="ssa-secondary-button" type="button" data-action="cancel-delete-api">取消</button>
-              </div>
-            </div>
-            <label>配置名称
-              <input type="text" autocomplete="off" placeholder="例如 主用接口、备用接口" data-api-profile="name">
-              <small>选为“整理用”或“向量用”后生效。</small>
-            </label>
-            <label>Chat Completions 完整地址
-              <input type="url" autocomplete="off" placeholder="https://example.com/v1/chat/completions" data-setting="extraEndpoint">
-            </label>
-            <label>模型（优先从接口自动读取）
-              <div class="ssa-input-action-row">
-                <input type="text" list="ssa-extra-model-list" autocomplete="off" placeholder="填写接口后自动读取，也可手动输入" data-setting="extraModel">
-                <button class="ssa-secondary-button" type="button" data-action="refresh-models">读取模型</button>
-              </div>
-              <datalist id="ssa-extra-model-list" data-role="extra-model-list"></datalist>
-              <small data-role="model-list-status">填写接口地址和 Key 后会自动读取可用模型。</small>
-            </label>
-            <label>API Key
-              <input type="password" autocomplete="new-password" placeholder="随当前配置保存在此浏览器" data-secret="extraApiKey">
-              <small>配置和密钥保存在这个浏览器里。</small>
-            </label>
-
-            <label>嵌入模型（向量用）
-              <input type="text" list="ssa-embedding-model-list" autocomplete="off" placeholder="例如 text-embedding-3-small，也可手动输入" data-setting="recallEmbeddingModel">
-              <datalist id="ssa-embedding-model-list" data-role="embedding-model-list"></datalist>
-              <small>只有被选为“向量用”的配置需要填。名字含 embed 的模型会自动选中。</small>
-            </label>
-            <button class="ssa-secondary-button" type="button" data-action="test-extra-api">测试这套配置</button>
-          </article>
-
-        </div></details><details class="ssa-settings-group" data-group="advanced"><summary><span>高级</span><small>发送范围、压缩阈值和向量回忆</small></summary><div class="ssa-group-body">
+</div></details><details class="ssa-settings-group" data-group="advanced"><summary><span>高级</span><small>发送范围、压缩阈值和向量回忆</small></summary><div class="ssa-group-body">
 
 
           <article class="ssa-summary-controls-card">
