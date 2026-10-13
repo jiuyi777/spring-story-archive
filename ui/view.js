@@ -100,6 +100,7 @@ export function createArchiveShell() {
           <p class="ssa-hero-sub" data-role="hero-sub"></p>
         </div>
         <button class="ssa-icon-button" type="button" data-action="close" aria-label="关闭">×</button>
+        <button class="ssa-grip" type="button" data-role="grip" aria-label="下拉关闭"></button>
       </header>
 
       <nav class="ssa-tabs" aria-label="档案页面">
@@ -157,7 +158,7 @@ export function createArchiveShell() {
               <button class="ssa-primary-button" type="button" data-action="backfill">补全下一批</button>
             </div>
           </div>
-          <p class="ssa-muted">同一批楼层只调用一次摘要 API，返回后仍分别保存为逐楼摘要；内容过长时会自动拆批。</p>
+          <p class="ssa-muted">多楼一起整理，结果按楼分开保存。</p>
           <div class="ssa-floor-list" data-role="floor-list"></div>
         </div></details>        </section>
         <section class="ssa-page" data-page="people">
@@ -188,14 +189,14 @@ export function createArchiveShell() {
             <div class="ssa-hero-mark" aria-hidden="true">春</div>
             <div>
               <h2>偏好测试</h2>
-              <p>10 道题加剧情体验多选，帮自主推进理解你想怎样体验故事。做一次就行，以后这里只显示结果。</p>
+              <p>10 道题和几项剧情体验，推进会按结果安排剧情。</p>
             </div>
           </article>
 
           <section class="ssa-preference-entry" data-role="preference-entry">
             <div>
               <strong>还没有玩家偏好档案</strong>
-              <p>可完成 10 题测试和剧情体验多选，也可以直接依据当前聊天进行保守分析。</p>
+              <p>做一次测试，或直接按当前聊天分析。</p>
             </div>
             <div class="ssa-entry-actions">
               <button class="ssa-primary-button" type="button" data-action="open-preference-test">开始首次测试</button>
@@ -223,22 +224,22 @@ export function createArchiveShell() {
           </header>
           <div class="ssa-test-intro">
             <strong>没有正确答案</strong>
-            <p>点选答案只保存在当前页面，不会请求 AI。只有点击“完成测试并生成分析”才会调用接口。</p>
-            <p>用于调整互动、连续性、冲突强度与新奇程度，不作心理诊断。聊天里后来明确说出的选择和边界始终优先。</p>
+            <p>选完点“完成测试并生成分析”。</p>
+            <p>结果用来调节互动多少、冲突强弱和新鲜感。</p>
           </div>
           <div class="ssa-quiz-questions">${preferenceQuizMarkup()}</div>
           <section class="ssa-test-section">
             <div class="ssa-section-heading">
               <div><p class="ssa-kicker">可多选</p><h2>想要的剧情体验</h2></div>
             </div>
-            <p class="ssa-muted">AI 会把这些选择与测试、聊天中的实际表达一起分析，不会按单个标签套模板。</p>
+            <p class="ssa-muted">和测试结果、你在聊天里说的话一起分析。</p>
             <div class="ssa-experience-grid">${storyExperienceMarkup()}</div>
           </section>
           <section class="ssa-test-section">
             <div class="ssa-section-heading">
               <div><p class="ssa-kicker">可多选</p><h2>喜欢的题材</h2></div>
             </div>
-            <p class="ssa-muted">按网文的习惯分了男频、女频和通用。无限流两边都列了，因为两种写法差别很大。</p>
+            <p class="ssa-muted">可以多选。</p>
             ${tasteMarkup().genres}
           </section>
           <section class="ssa-test-section">
@@ -251,7 +252,7 @@ export function createArchiveShell() {
                 <option value="">不知道 / 不填</option>
                 ${MBTI_TYPES.map((type) => `<option value="${type}">${type}</option>`).join('')}
               </select>
-              <small>只作参考，不会拿来给你下定论；你在聊天里说的话永远优先。</small>
+              <small>选你自己的类型，推进时参考。</small>
             </label>
           </section>
           <section class="ssa-test-section">
@@ -293,15 +294,15 @@ export function createArchiveShell() {
             <h2>摘要方式</h2>
             <div class="ssa-summary-control-grid">
               <label>自动同步频率<select data-setting="memoryUpdateEvery"><option value="1">每轮回复</option><option value="2">每 2 轮</option><option value="3">每 3 轮</option><option value="5">每 5 轮</option></select></label>
-              <label>积累多少内容后同步<input type="number" min="0" max="10000" step="100" data-setting="memoryMinTokens"><small>估算 token；0 表示立即同步。生成选项或推进时会先处理已积累的新楼层。</small></label>
+              <label>积累多少内容后同步<input type="number" min="0" max="10000" step="100" data-setting="memoryMinTokens"><small>新内容攒到这么多 token 再整理；填 0 每楼都整理。</small></label>
             </div>
             <label>春序每轮最多带入（token）
               <input type="number" min="1000" max="1000000" step="1000" inputmode="numeric" data-setting="memoryTokenLimit">
-              <small>玩家记录、剧情状态、小结和回忆加起来不超过这个数。默认 20,000，最多 1,000,000，按你用的模型上下文填。放不下时先减回忆，再减较早的小结。</small>
+              <small>每轮带入的玩家记录、剧情状态、小结和回忆总量，最多 1,000,000。超出时先少带回忆，再少带早期小结。</small>
             </label>
             <label>摘要格式（可选）
               <textarea rows="3" data-setting="summaryFormat" placeholder="留空用默认写法：谁在何时何地做了什么、结果如何，一两句。&#10;例：【时间｜地点】人物：做了什么 → 结果"></textarea>
-              <small>每楼小结按这里的格式写。可以写模板，也可以直接说要求，比如“保留对白原话”“每条不超过 40 字”。</small>
+              <small>每楼小结按这里的格式写，可以是模板，也可以是要求，比如“保留对白原话”“每条不超过 40 字”。</small>
               <span class="ssa-format-presets">
                 <button type="button" class="ssa-text-button" data-action="summary-format-preset" data-format="">默认</button>
                 <button type="button" class="ssa-text-button" data-action="summary-format-preset" data-format="【时间｜地点】人物：做了什么 → 结果">时间地点人物</button>
@@ -314,7 +315,7 @@ export function createArchiveShell() {
               ${switchControlMarkup('autoSummarize', '自动记录新楼层')}
             </label>
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>自动整理旧楼层</strong><small>打开一个还没整理过的聊天时，在后台一批一批补上摘要，不用手动点。换聊天或关掉这个开关会立刻停下。</small></span>
+              <span class="ssa-switch-copy"><strong>自动整理旧楼层</strong><small>打开没整理过的聊天时，在后台分批补上旧楼层。</small></span>
               ${switchControlMarkup('autoBackfill', '自动整理旧楼层')}
             </label>
             <label>自动压缩阈值（token）
@@ -323,13 +324,13 @@ export function createArchiveShell() {
             </label>
           </article>
 
-</div></details><details class="ssa-settings-group"><summary><span>剧情选项</span><small>主模型在回复末尾顺带写，不额外调用</small></summary><div class="ssa-group-body">
+</div></details><details class="ssa-settings-group"><summary><span>剧情选项</span><small>回复末尾附几个下一步选项</small></summary><div class="ssa-group-body">
           <article class="ssa-paper-card">
             <p class="ssa-kicker">正文下方显示</p>
             <h2>选择选项的表达方式和数量</h2>
-            <p class="ssa-muted">开启后，每轮在提示词末尾加一段要求，让主模型写完正文后顺带写几个选项。选项留在回复末尾，由美化正则排成卡片，点一下只填入输入框，不会自动发送给 AI。发给模型时会去掉，也不会被整理进记忆。</p>
+            <p class="ssa-muted">主模型写完正文后附上几个选项，显示成卡片，点一下填进输入框。</p>
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>剧情选项功能</strong><small>由玩家决定是否开启；默认关闭。</small></span>
+              <span class="ssa-switch-copy"><strong>剧情选项功能</strong><small>在回复末尾显示选项卡片。</small></span>
               ${switchControlMarkup('optionsEnabled', '剧情选项功能')}
             </label>
             <div class="ssa-slot-editor">
@@ -337,7 +338,7 @@ export function createArchiveShell() {
                 <span>选项类别</span>
                 <small data-role="option-slot-total"></small>
               </div>
-              <p class="ssa-muted">每一类在回复里写成 &lt;co&gt;【类别名】……&lt;/co&gt;，名字、数量和要求都可以改，最多一共 12 个。按从上到下的顺序输出。</p>
+              <p class="ssa-muted">名字、数量和要求都可以改，一共最多 12 个，按从上到下的顺序出现。</p>
               <div data-role="option-slots"></div>
               <div class="ssa-slot-actions">
                 <button class="ssa-secondary-button" type="button" data-action="add-option-slot">添加一类</button>
@@ -347,19 +348,19 @@ export function createArchiveShell() {
               </div>
             </div>
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>用正则美化显示</strong><small>开启后自动在酒馆的正则列表里加三条“春序 · 剧情选项”脚本：选项留在回复里排成卡片，点一下填入输入框；发给模型时自动去掉。可以在酒馆正则面板里改样式，插件不会覆盖你的修改。</small></span>
+              <span class="ssa-switch-copy"><strong>用正则美化显示</strong><small>在酒馆正则里加三条“春序 · 剧情选项”脚本，负责排成卡片、发送时去掉选项。样式可以在正则面板里改。</small></span>
               ${switchControlMarkup('optionRegexEnabled', '用正则美化显示')}
             </label>
             <button class="ssa-secondary-button" type="button" data-action="reset-option-regex">恢复默认美化正则</button>
             <label>所有选项都要遵守的要求
               <textarea rows="3" data-setting="optionWritingNotes" placeholder="每行一条。留空就不加通用要求。"></textarea>
-              <small>格式那几条（只写在选项块里、块后空一行）由插件固定加上，不用写。</small>
+              <small>选项块的格式由插件加上。</small>
             </label>
           </article>
 </div></details><details class="ssa-settings-group" data-group="cliche"><summary><span>八股删除器</span><small>回复里的套话自动删改，可以撤销</small></summary><div class="ssa-group-body">
           <article class="ssa-paper-card">
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>清理回复里的八股</strong><small>“命运的齿轮”“比哭还难看”“说实话，”这类套话。纯填充词在本地直接删；需要改写的句子交给整理 API，在每楼那一次整理里顺带完成，不额外调用。</small></span>
+              <span class="ssa-switch-copy"><strong>清理回复里的八股</strong><small>删掉“命运的齿轮”“比哭还难看”“说实话，”这类套话。填充词直接删，整句套话在整理时改写。</small></span>
               ${switchControlMarkup('clicheEnabled', '清理回复里的八股')}
             </label>
             <fieldset class="ssa-mode-fieldset">
@@ -369,19 +370,19 @@ export function createArchiveShell() {
                 <label><input type="radio" name="ssa-cliche-mode" value="mark" data-setting="clicheMode"><span>只标出来</span></label>
               </div>
             </fieldset>
-            <p class="ssa-muted">清理后，下一轮发送的历史和整理进记忆的都是清理后的版本，模型不会照着旧套话继续写。每条回复下面会显示删改了几处，点“撤销”恢复原文，这一楼以后不再清理。</p>
+            <p class="ssa-muted">每条回复下面显示删改了几处，点“撤销”恢复原文。</p>
             <label>自己加的规则
               <textarea rows="4" data-setting="clicheCustomRules" placeholder="每行一条。&#10;删:总而言之    本地直接删&#10;改:眸光        交给整理 API 改写&#10;标:叹了口气    只标出来&#10;/眸[光色]/      斜杠包起来是正则"></textarea>
-              <small>内置 ${DEFAULT_CLICHE_RULES.length} 条规则来自“八股”清单，常用词（如“似乎”“一丝”）只有在一条回复里反复出现时才算。</small>
+              <small>内置 ${DEFAULT_CLICHE_RULES.length} 条规则来自“八股”清单，“似乎”“一丝”这类常用词，一条回复里反复出现才算。</small>
             </label>
           </article>
-        </div></details><details class="ssa-settings-group"><summary><span>自主推进</span><small>每轮提醒主模型让世界往前走一小步</small></summary><div class="ssa-group-body">
+        </div></details><details class="ssa-settings-group"><summary><span>自主推进</span><small>每轮安排一件推动剧情的事</small></summary><div class="ssa-group-body">
 
           <article class="ssa-paper-card ssa-advance-card">
             <p class="ssa-kicker">自主推进剧情</p>
             <h2>后台推进</h2>
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>开启自主推进</strong><small>每轮整理时顺便安排下一轮推什么，跟正常回复一起发出，不额外调用接口。首页可以看、改、换一个或这轮不推。默认关闭。</small></span>
+              <span class="ssa-switch-copy"><strong>开启自主推进</strong><small>整理时安排下一轮推什么，随回复一起发出。首页可以改、换一个或跳过。</small></span>
               ${switchControlMarkup('autoAdvanceEnabled', '自主推进剧情')}
             </label>
             <label>推进力度
@@ -402,16 +403,16 @@ export function createArchiveShell() {
             <label>自定义事件池
               <textarea rows="3" data-setting="advanceEventPool" placeholder="每行一件可能发生的事，勾选“自定义事件池”后生效。&#10;例：门外有人敲门&#10;旧宅突然停电"></textarea>
             </label>
-            <p class="ssa-notice">每轮只挑一两种方式，最近用过的会先轮空；整理接口没跟上时由插件按局面挑。要不要替玩家说话，按你预设里的设置来。做过偏好测试的话，会一并参考你的题材口味。</p>
+            <p class="ssa-notice">每轮挑一两种方式，最近用过的先轮空。做过偏好测试会参考你的题材口味。</p>
           </article>
           
         </div></details><details class="ssa-settings-group"><summary><span>NPC</span><small>按剧情需要自动建立配角档案</small></summary><div class="ssa-group-body">
           <article class="ssa-paper-card ssa-npc-archive-intro">
             <p class="ssa-kicker">当前聊天</p>
             <h2>NPC 人物档案</h2>
-            <p class="ssa-muted">AI 根据剧情自行判断人物功能，再记录年龄、人生阶段、工作与客观状态，并用具体经历解释性格和矛盾。档案不预设固定口癖、小动作或行为模板。</p>
+            <p class="ssa-muted">按剧情需要建立配角：年龄、职业、经历和目标，用经历解释性格。</p>
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>按剧情需要自动建档与更新</strong><small>AI 自行判断当前缺少的剧情功能；剧情明确推进年龄、工作或人生阶段时更新，默认关闭。</small></span>
+              <span class="ssa-switch-copy"><strong>按剧情需要自动建档与更新</strong><small>剧情需要新人物时自动建档，人物成长时更新。</small></span>
               ${switchControlMarkup('autoNpcEnabled', 'NPC 自动建档与更新')}
             </label>
             <label>补充要求（可选）
@@ -449,7 +450,7 @@ export function createArchiveShell() {
             </div>
             <label>配置名称
               <input type="text" autocomplete="off" placeholder="例如 主用接口、备用接口" data-api-profile="name">
-              <small>修改后自动保存。在上面把它选为“整理用”或“向量用”才会被使用。</small>
+              <small>选为“整理用”或“向量用”后生效。</small>
             </label>
             <label>Chat Completions 完整地址
               <input type="url" autocomplete="off" placeholder="https://example.com/v1/chat/completions" data-setting="extraEndpoint">
@@ -464,7 +465,7 @@ export function createArchiveShell() {
             </label>
             <label>API Key
               <input type="password" autocomplete="new-password" placeholder="随当前配置保存在此浏览器" data-secret="extraApiKey">
-              <small>配置和密钥保存在当前浏览器，重开后保留；不随档案导出，也不会同步到其他设备。同页扩展仍可能读取密钥。</small>
+              <small>配置和密钥保存在这个浏览器里。</small>
             </label>
 
             <label>嵌入模型（向量用）
@@ -475,22 +476,17 @@ export function createArchiveShell() {
             <button class="ssa-secondary-button" type="button" data-action="test-extra-api">测试这套配置</button>
           </article>
 
-        </div></details><details class="ssa-settings-group" data-group="advanced"><summary><span>高级</span><small>发送范围、压缩阈值和向量回忆</small></summary><div class="ssa-group-body">      <div class="ssa-privacy-ribbon">
-        <span class="ssa-leaf-dot" aria-hidden="true"></span>
-        <strong>远端原文边界</strong>
-        <span data-role="remote-floor-boundary">默认不发送历史楼层原文</span>
-        <span class="ssa-local-badge">更早原文只留本机</span>
-      </div>
+        </div></details><details class="ssa-settings-group" data-group="advanced"><summary><span>高级</span><small>发送范围、压缩阈值和向量回忆</small></summary><div class="ssa-group-body">
 
 
           <article class="ssa-summary-controls-card">
             <h2>让 AI 读取剧情总摘要</h2>
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>每次回复前发送总摘要</strong><small>自动读取当前聊天档案，正常聊天即可使用；无需开启语义回忆。</small></span>
+              <span class="ssa-switch-copy"><strong>每次回复前发送总摘要</strong><small>回复前带上剧情总摘要和当前状态。</small></span>
               ${switchControlMarkup('summaryContextEnabled', '每次回复前发送总摘要')}
             </label>
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>过滤已摘要的旧楼层原文</strong><small>保留最近 5 楼；更早且已被本轮摘要覆盖的原文只在发送时过滤，本地聊天记录完整保留。</small></span>
+              <span class="ssa-switch-copy"><strong>过滤已摘要的旧楼层原文</strong><small>只发最近 5 楼原文，更早的用摘要代替。聊天记录本身不变。</small></span>
               ${switchControlMarkup('filterArchivedFloors', '过滤已摘要的旧楼层原文')}
             </label>
             <p class="ssa-muted" data-role="story-context-status" role="status">等待下次回复前读取剧情总摘要</p>
@@ -503,7 +499,7 @@ export function createArchiveShell() {
             <div class="ssa-summary-control-grid">
               <label>自动压缩阈值（token）
                 <input type="number" min="1000" max="200000" step="1000" data-setting="rollupTokenLimit">
-                <small>总摘要达到此值或每满 100 楼时自动压缩。</small>
+                <small>总摘要到这个长度或每满 100 楼时压缩一次。</small>
               </label>
               <label>默认展开最近楼层
                 <select data-setting="expandedFloorCount">
@@ -511,7 +507,7 @@ export function createArchiveShell() {
                   <option value="5">最近 5 楼</option>
                   <option value="10">最近 10 楼</option>
                 </select>
-                <small>更早楼层默认折叠，点击楼层标题即可查看。</small>
+                <small>更早的楼层折叠显示。</small>
               </label>
               <label class="ssa-summary-remote-control">发送给剧情辅助接口的历史原文
                 <select data-setting="remoteRawFloorLimit">
@@ -520,7 +516,7 @@ export function createArchiveShell() {
                   <option value="3">最近 3 楼</option>
                   <option value="5">最近 5 楼</option>
                 </select>
-                <small>默认不发送。批量逐楼摘要只发送正在整理的本批楼层，否则无法生成这些摘要；所有请求另有约 6500 token 的硬上限。</small>
+                <small>整理时发给接口的上下文范围。</small>
               </label>
             </div>
           </article>
@@ -535,9 +531,9 @@ export function createArchiveShell() {
                 <option value="vector">只用向量（失败时临时改用关键词）</option>
                 <option value="off">关闭</option>
               </select>
-              <small>回复前从旧楼层的小结里找出和眼下有关的几段一起发送。关键词方式用档案里已有的人名、物品、地点去匹配；向量方式按意思找，更准，但要配好“向量用”的接口。已经在这次请求里的楼层不会重复带入。</small>
+              <small>回复前从旧楼层里找出和眼下有关的几段一起发送。关键词方式按人名、物品、地点匹配；向量方式按意思找，需要配好“向量用”接口。</small>
             </label>
-            <p class="ssa-notice">不会把某次拒绝、同意或边界永久化。同一主题后来有新表态时，以更晚楼层为当前状态，旧表态只保留为历史。</p>
+            
             <div class="ssa-inline-fields is-three-columns">
               <label>召回数量
                 <select data-setting="recallTopK">
@@ -576,7 +572,7 @@ export function createArchiveShell() {
 
       <footer class="ssa-footer">
         <span data-role="status" role="status">本地档案待命</span>
-        <span>档案仅保存在此浏览器</span>
+        <span>档案保存在这个浏览器</span>
       </footer>
     </section>
   `;
@@ -1215,8 +1211,24 @@ export function syncSettings(root, settings, apiKey = '') {
   }
 }
 
+// SillyTavern themes change the top bar's height, so measure it on open.
+function measureTopBar(root) {
+  const bar = document.querySelector('#top-bar');
+  const bottom = bar ? Math.round(bar.getBoundingClientRect().bottom) : 0;
+  if (bottom > 0 && bottom < window.innerHeight / 3) root.style.setProperty('--ssa-top', `${bottom + 4}px`);
+  else root.style.removeProperty('--ssa-top');
+}
+
 export function setOpen(root, open) {
-  if (open) setLauncherDocked(root, false);
+  if (open) {
+    setLauncherDocked(root, false);
+    measureTopBar(root);
+    const app = root.querySelector('.ssa-app');
+    app.classList.remove('is-entering');
+    void app.offsetWidth;
+    app.classList.add('is-entering');
+    app.addEventListener('animationend', () => app.classList.remove('is-entering'), { once: true });
+  }
   root.querySelector('.ssa-app').hidden = !open;
   root.querySelector('.ssa-backdrop').hidden = !open;
   root.classList.toggle('is-open', open);

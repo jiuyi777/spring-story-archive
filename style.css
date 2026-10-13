@@ -2867,3 +2867,42 @@
 #spring_story_archive_root .ssa-hero-option:has(input:focus-visible) .ssa-hero-thumb { outline: 2px solid var(--ssa-deep); outline-offset: 2px; }
 #spring_story_archive_root [data-role="hero-url"] { display: grid; gap: 4px; margin-top: 12px; }
 #spring_story_archive_root [data-role="hero-url"][hidden] { display: none; }
+
+/* Switches: undo SillyTavern's checkbox tick so the knob is a plain circle */
+#spring_story_archive_root .ssa-switch-row input[type="checkbox"] {
+  display: block; position: relative; width: 46px; height: 26px; min-height: 26px; margin: 0; padding: 0;
+  border: 0; border-radius: 13px; filter: none; transform: none; place-content: normal;
+  background: color-mix(in srgb, var(--ssa-olive) 70%, var(--ssa-paper)); box-shadow: inset 0 0 0 1px var(--ssa-border-soft);
+}
+#spring_story_archive_root .ssa-switch-row input[type="checkbox"]::before {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; margin: 0;
+  border-radius: 50%; clip-path: none; transform: none; transform-origin: center;
+  background: var(--ssa-paper-strong); box-shadow: 0 1px 3px color-mix(in srgb, var(--ssa-ink) 25%, transparent);
+  transition: transform .18s ease;
+}
+#spring_story_archive_root .ssa-switch-row input[type="checkbox"]:checked { background: var(--ssa-deep); box-shadow: none; }
+#spring_story_archive_root .ssa-switch-row input[type="checkbox"]:checked::before { transform: translateX(20px); }
+
+/* Below SillyTavern's top bar, measured when the panel opens */
+@media (max-width: 720px) {
+  #spring_story_archive_root .ssa-app { inset: var(--ssa-top, calc(var(--topBarBlockSize, 0px) + 8px)) 0 0; }
+}
+
+/* Drag handle: pull down to close */
+#spring_story_archive_root .ssa-grip {
+  position: absolute; z-index: 3; left: 50%; bottom: 0; width: 120px; height: 30px; margin-left: -60px;
+  padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none;
+}
+#spring_story_archive_root .ssa-grip::after {
+  content: ""; position: absolute; left: 41px; top: 12px; width: 38px; height: 4px; border-radius: 2px; background: var(--ssa-olive);
+}
+@media (max-width: 720px) {
+  #spring_story_archive_root .ssa-main::before { display: none; }
+}
+#spring_story_archive_root .ssa-app.is-dragging { transition: none; }
+#spring_story_archive_root .ssa-app.is-settling { transition: transform .22s ease; }
+#spring_story_archive_root.is-open .ssa-app.is-entering { animation: ssa-sheet-in .26s ease-out; }
+@keyframes ssa-sheet-in { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { #spring_story_archive_root.is-open .ssa-app.is-entering { animation: none; } }
+#spring_story_archive_root .ssa-header.ssa-hero { touch-action: none; user-select: none; }
+#spring_story_archive_root .ssa-header.ssa-hero { z-index: auto; }

@@ -59,12 +59,60 @@ export function renderHero(root, update = {}) {
   }
 }
 
+// Shrinks once scrolled and grows back only near the top. A page too short to
+// stay scrolled after the picture shrinks never shrinks it, or it would bounce.
 export function watchHeroScroll(root) {
   const main = root.querySelector('.ssa-main');
-  if (!main) return;
+  const header = root.querySelector('.ssa-header');
+  if (!main || !header) return;
   let compact = false;
-  main.addEventListener('scroll', () => {
-    const next = main.scrollTop > 48;
-    if (next !== compact) { compact = next; root.classList.toggle('is-hero-compact', compact); }
-  }, { passive: true });
+  let frame = 0;
+  const update = () => {
+    frame = 0;
+    const room = main.scrollHeight - main.clientHeight;
+    const saved = compact ? 0 : header.offsetHeight - 86;
+    if (!compact && main.scrollTop > 56 && room - saved > 80) compact = true;
+    else if (compact && main.scrollTop < 6) compact = false;
+    else return;
+    root.classList.toggle('is-hero-compact', compact);
+  };
+  main.addEventListener('scroll', () => { if (!frame) frame = requestAnimationFrame(update); }, { passive: true });
+  bindGrip(root);
+}
+
+// Pull the handle (or the picture) down to close the panel.
+function bindGrip(root) {
+  const app = root.querySelector('.ssa-app');
+  const header = root.querySelector('.ssa-header');
+  let drag = null;
+  header.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || event.target.closest('[data-action="close"]')) return;
+    drag = { id: event.pointerId, y: event.clientY, dy: 0, moved: false };
+    header.setPointerCapture?.(event.pointerId);
+  });
+  header.addEventListener('pointermove', (event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    drag.dy = Math.max(0, event.clientY - drag.y);
+    if (!drag.moved && drag.dy < 6) return;
+    drag.moved = true;
+    app.classList.add('is-dragging');
+    app.style.transform = `translateY(${drag.dy}px)`;
+  });
+  const end = (event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    const { dy, moved } = drag;
+    drag = null;
+    app.classList.remove('is-dragging');
+    if (!moved) { app.style.transform = ''; return; }
+    app.classList.add('is-settling');
+    const close = dy > Math.min(160, app.offsetHeight * 0.22);
+    app.style.transform = close ? `translateY(${app.offsetHeight}px)` : '';
+    setTimeout(() => {
+      app.classList.remove('is-settling');
+      app.style.transform = '';
+      if (close) root.querySelector('[data-action="close"]')?.click();
+    }, 220);
+  };
+  header.addEventListener('pointerup', end);
+  header.addEventListener('pointercancel', end);
 }

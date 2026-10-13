@@ -54,7 +54,7 @@ test('summary controls use normal document flow and the mobile backfill action s
   assert.match(source, /\[data-action="backfill"\][\s\S]*?white-space:\s*nowrap/);
   assert.match(view, /data-setting="backfillBatchSize"/);
   assert.match(view, /补全下一批/);
-  assert.match(view, /同一批楼层只调用一次摘要 API/);
+  assert.match(view, /多楼一起整理，结果按楼分开保存/);
   assert.doesNotMatch(view, /value="30"/);
   assert.doesNotMatch(view, /补全全部缺失摘要/);
 });
@@ -73,7 +73,7 @@ test('story options have an explicit master switch and choosing only fills the i
     readFile(new URL('../index.js', import.meta.url), 'utf8'),
   ]);
   assert.match(view, /switchControlMarkup\('optionsEnabled'/);
-  assert.match(view, /不会自动发送给 AI/);
+  assert.match(view, /点一下填进输入框/);
   assert.match(index, /if \(!settings\.optionsEnabled\) throw new Error/);
   const chooseOption = index.match(/function chooseOption\(text\) \{([\s\S]*?)\n\}/)?.[1] ?? '';
   assert.match(chooseOption, /#send_textarea/);
@@ -85,7 +85,7 @@ test('quiz choices stay local until the explicit analysis button is clicked', as
     readFile(new URL('../ui/view.js', import.meta.url), 'utf8'),
     readFile(new URL('../index.js', import.meta.url), 'utf8'),
   ]);
-  assert.match(view, /点选答案只保存在当前页面，不会请求 AI/);
+  assert.match(view, /选完点“完成测试并生成分析”/);
   assert.match(index, /if \(quizInput \|\| event\.target\.closest\('\[data-experience-id\]'\)\) return/);
 });
 
@@ -106,7 +106,7 @@ test('summary page exposes a zero-history remote floor mode', async () => {
   assert.match(source, /data-setting="remoteRawFloorLimit"/);
   assert.match(source, /<option value="0">不发送历史原文<\/option>/);
   assert.match(source, /批量摘要只发送本批楼层/);
-  assert.match(source, /约 6500 token 的硬上限/);
+  assert.match(source, /整理时发给接口的上下文范围/);
 });
 
 test('player preference profile uses one global storage key with legacy chat migration', async () => {
