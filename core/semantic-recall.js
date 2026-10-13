@@ -1,4 +1,4 @@
-import { RAW_FLOOR_LIMIT, validSummaries } from './privacy-payload.js?v=0.7.1';
+import { RAW_FLOOR_LIMIT, validSummaries, storyText, messageStoryText } from './privacy-payload.js?v=0.7.2';
 
 function normalizeText(value) {
   return String(value ?? '').replace(/\u0000/g, '').trim();
@@ -82,7 +82,7 @@ export function buildRecallQuery(chat, targetFloorIndex, recentCount = 2) {
   const start = Math.max(0, target - count + 1);
   return rows.slice(start, target + 1).map((message, offset) => {
     const speaker = message?.is_user ? '玩家' : normalizeText(message?.name) || '角色';
-    return `第 ${start + offset + 1} 楼 · ${speaker}：${normalizeText(message?.mes)}`;
+    return `第 ${start + offset + 1} 楼 · ${speaker}：${messageStoryText(message)}`;
   }).join('\n');
 }
 
@@ -238,4 +238,24 @@ export class SemanticRecallService {
     await this.storage.clearVectors(chatKey);
     return this.sync(chatKey, summaries, { force: true });
   }
+}
+
+// Recall only adds what the prompt does not already carry: a floor whose
+// summary is in the story block, or whose raw text is still in the chat
+// history, is skipped. What is left is cut to the remaining budget, whole
+// records only, best matches first.
+export function fitRecall(records, { skipFloors = new Set(), budget = Infinity, estimate = (text) => String(text ?? '').length } = {}) {
+  const kept = [];
+  let used = 0;
+  const dropped = { duplicate: 0, budget: 0 };
+  const byMatch = [...(records ?? [])].sort((left, right) => (right.similarity ?? 0) - (left.similarity ?? 0));
+  for (const record of byMatch) {
+    if (skipFloors.has(record.floorIndex)) { dropped.duplicate += 1; continue; }
+    const cost = estimate(`【第 ${record.floorIndex + 1} 楼的历史摘要】\n${record.sourceText}\n\n`);
+    if (used + cost > budget) { dropped.budget += 1; continue; }
+    kept.push(record);
+    used += cost;
+  }
+  kept.sort((left, right) => left.floorIndex - right.floorIndex);
+  return { records: kept, prompt: kept.length ? formatRecallPrompt(kept) : '', usedTokens: kept.length ? estimate(formatRecallPrompt(kept)) : 0, dropped };
 }

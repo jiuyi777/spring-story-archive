@@ -24,7 +24,7 @@ if (new URLSearchParams(location.search).has('mobile')) {
    return JSON.stringify({floors:(payload.targetFloors||[]).map(({floor})=>({floor,summary:'林素在档案室核对登记簿。',changes:[{table:'scene',id:'current',values:{time:'雨夜',location:'旧宅档案室'}},{table:'characters',id:'林素',values:{name:'林素',location:'旧宅档案室',state:'核对登记簿'}},{table:'inventory',id:'登记簿',values:{name:'登记簿',owner:'林素',quantity:'1'}}]}))});
  }};
  globalThis.SillyTavern={getContext:()=>context};
- render(); await import('../index.js?v=0.7.1');
+ render(); await import('../index.js?v=0.7.2');
  const generate=async(type,stop=false)=>{
    document.querySelector('#receipt').textContent='正在模拟宿主生成流程';
    if(type!=='swipe'){chat.push({name:'玩家',is_user:true,mes:'请林素说明登记簿的改动。'});render();await emit('MESSAGE_SENT',chat.length-1);}

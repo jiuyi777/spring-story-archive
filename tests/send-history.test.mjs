@@ -54,7 +54,7 @@ test('context selection follows aliases, current location, owners and relationsh
   const result = selectMemoryDatabase(database, { query: '把东西还给林小姐', budget: 1000 });
   assert.match(result.text, /登记簿/); assert.match(result.text, /借用未归还/);
   assert.doesNotMatch(result.text, /帆船|陈先生|旧案/);
-  assert.equal(result.records.find(row => row.id === 'book').reason, '相关人物持有或负责');
+  assert.equal(result.records.find(row => row.id === 'book').reason, '相关人物持有或拥有');
   assert.equal(selectMemoryDatabase(database, { query: '林小姐', budget: 1 }).records.length, 0);
 });
 

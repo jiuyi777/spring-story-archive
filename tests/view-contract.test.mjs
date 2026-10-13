@@ -29,7 +29,8 @@ test('large summary is folded by default and mixed option mode is available', as
   const source = await readFile(new URL('../ui/view.js', import.meta.url), 'utf8');
   assert.match(source, /<details class="ssa-rollup-card">/);
   assert.doesNotMatch(source, /<details class="ssa-rollup-card" open>/);
-  assert.match(source, /value="mixed" data-setting="optionMode"/);
+  assert.match(source, /data-role="option-slots"/);
+  assert.match(source, /data-action="add-option-slot"/);
 });
 
 test('NPC editor uses objective life fields and removes entrance and story hooks', async () => {
@@ -93,7 +94,7 @@ test('every feature toggle displays an explicit on or off label', async () => {
     readFile(new URL('../ui/view.js', import.meta.url), 'utf8'),
     readFile(new URL('../style.css', import.meta.url), 'utf8'),
   ]);
-  for (const setting of ['autoSummarize', 'optionsEnabled', 'autoAdvanceEnabled', 'autoNpcEnabled', 'semanticRecallEnabled']) {
+  for (const setting of ['autoSummarize', 'optionsEnabled', 'autoAdvanceEnabled', 'autoNpcEnabled']) {
     assert.match(view, new RegExp(`switchControlMarkup\\('${setting}'`));
   }
   assert.match(view, /state\.textContent = enabled \? '已开启' : '已关闭'/);
@@ -122,7 +123,8 @@ test('semantic recall UI and generation interceptor are wired without permanent 
     readFile(new URL('../manifest.json', import.meta.url), 'utf8'),
     readFile(new URL('../style.css', import.meta.url), 'utf8'),
   ]);
-  assert.match(view, /自动找回相关往事/);
+  assert.match(view, /data-setting="recallMode"/);
+  assert.match(view, /<option value="auto">自动（默认）/);
   assert.match(view, /data-action="rebuild-recall"/);
   assert.match(index, /setExtensionPrompt/);
   assert.match(index, /phase: result\.prompt \? 'injected' : 'empty'/);

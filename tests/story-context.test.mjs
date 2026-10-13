@@ -3,8 +3,9 @@ import { createMemoryStorage } from '../core/storage.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { buildStoryContext, createStoryRequest, injectStoryContext, STORY_PROMPT_ID } from '../core/story-context.js';
-import { fingerprintMessage, fingerprintSummaries } from '../core/privacy-payload.js';
+import { buildStoryContext, createStoryRequest, injectStoryContext, STORY_PROMPT_ID, memoryBudgetFor } from '../core/story-context.js';
+import { fitRecall } from '../core/semantic-recall.js';
+import { fingerprintMessage, fingerprintSummaries, estimateTokens } from '../core/privacy-payload.js';
 import vm from 'node:vm';
 
 function fixture() {
@@ -39,8 +40,9 @@ test('missing, failed and edited floors remain as raw messages', () => {
 test('unaffordable summary blocks keep their original floors', () => {
   const data = fixture();
   data.summaries[0].summary = '长'.repeat(7000);
+  data.memoryBudget = 6000;
   assert.ok(!buildStoryContext(data).removeIndexes.includes(0));
-  data.contextSize = 100;
+  data.memoryBudget = 10;
   assert.equal(buildStoryContext(data).prompt, '');
   assert.deepEqual(buildStoryContext(data).removeIndexes, []);
 });
@@ -113,10 +115,10 @@ test('real interceptor restores raw history and aborts if summary is disabled du
   const reachedRecall = new Promise(resolve => { started = resolve; });
   const sandbox = { storyRequest: null, sendHistory: null, createSendHistory, renderSendHistory() {}, setStatus() {}, createStoryRequest,
     getContext: () => context, currentChatKey: () => 'A', getSettings: () => settings,
-    fingerprintMessage, injectStoryContext, STORY_PROMPT_ID, RECALL_PROMPT_ID: 'recall',
+    fingerprintMessage, injectStoryContext, STORY_PROMPT_ID, RECALL_PROMPT_ID: 'recall', memoryBudgetFor, fitRecall, estimateTokens, recallOn: () => Boolean(sandbox.getSettings().semanticRecallEnabled),
     engine: { chatKey: 'A', storage: { ...createMemoryStorage(), listSummaries: async () => data.summaries, listCheckpoints: async () => [] } },
     clearStoryPrompt: () => prompts.set(STORY_PROMPT_ID, ''), clearRecallPrompt: () => prompts.set('recall', ''),
-    showStoryContextStatus() {}, renderRecallState() {}, root: {}, recallState: {},
+    showStoryContextStatus() {}, renderRecallState() {}, showRecallState() {}, root: {}, recallState: {},
     recallForCurrentContext: async () => { started(); return new Promise(resolve => { release = resolve; }); },
   };
   vm.createContext(sandbox);
@@ -141,10 +143,10 @@ test('real interceptor injects normal summary when semantic recall is off', asyn
   const context = { chat: data.sourceChat, stopGeneration() {}, eventTypes: { GENERATE_AFTER_DATA: 'generate_after_data' }, setExtensionPrompt: (key, text) => prompts.set(key, text) };
   const sandbox = { storyRequest: null, sendHistory: null, createSendHistory, renderSendHistory() {}, setStatus() {}, createStoryRequest,
     getContext: () => context, currentChatKey: () => 'A', getSettings: () => ({ summaryContextEnabled: true, filterArchivedFloors: true, semanticRecallEnabled: false }),
-    fingerprintMessage, injectStoryContext, STORY_PROMPT_ID,
+    fingerprintMessage, injectStoryContext, STORY_PROMPT_ID, memoryBudgetFor, fitRecall, estimateTokens, recallOn: () => Boolean(sandbox.getSettings().semanticRecallEnabled),
     engine: { chatKey: 'A', storage: { ...createMemoryStorage(), listSummaries: async () => data.summaries, listCheckpoints: async () => [] } },
     clearStoryPrompt: () => prompts.set(STORY_PROMPT_ID, ''), clearRecallPrompt() {},
-    showStoryContextStatus() {}, renderRecallState() {}, root: {}, recallState: {},
+    showStoryContextStatus() {}, renderRecallState() {}, showRecallState() {}, root: {}, recallState: {},
   };
   vm.createContext(sandbox);
   vm.runInContext(functions, sandbox);

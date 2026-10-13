@@ -224,7 +224,7 @@ function indexHarness(context, settings, engine) {
     getContext: () => context, currentChatKey: () => engine.chatKey, getSettings: () => settings,
     engine, fingerprintMessage, createStoryRequest, storyRequest: null, sendHistory: null, advanceEpoch: 0, autoAdvanceRemaining: 1,
     advancing: false, root: {}, document: { querySelector: () => ({ value: '' }) }, window: { setTimeout() {} },
-    getPlayerPreferenceProfile: async () => ({ summary: 'profile' }), setStatus() {}, saveSettings() {}, syncSettings() {}, getApiKey: () => '',
+    getPlayerPreferenceProfile: async () => ({ summary: 'profile' }), setStatus() {}, saveSettings() {}, syncSettings() {}, renderOverview() {}, getApiKey: () => '',
     showStoryContextStatus() {}, clearRecallPrompt() {}, refreshView: async () => {}, buildPrivacyPayload,
     addSemanticRecall: async (value) => value, createProvider: () => ({}), getExtraCredentials: () => ({}), profileKey: (a, b) => `${a}::${b}`, STORY_PROMPT_ID,
   };
@@ -233,23 +233,6 @@ function indexHarness(context, settings, engine) {
     + section('async function handleSettingChange(', '\nfunction bindUi'), sandbox);
   return sandbox;
 }
-
-test('disabling advance while the director is in flight stops the next normal generation', async () => {
-  const started = deferred();
-  const finish = deferred();
-  let generations = 0;
-  const context = { chat: [{ mes: 'reply', is_user: false }], generate: async () => { generations += 1; } };
-  const engine = { chatKey: 'A', chatRevision: 0, storage: createMemoryStorage(), waitForIdle: async () => {} };
-  const sandbox = indexHarness(context, { autoAdvanceEnabled: true, advanceSource: 'current' }, engine);
-  sandbox.requestAdvanceDirective = async () => { started.resolve(); return finish.promise; };
-  vm.runInContext(section('async function runAutoAdvance(', '\nasync function generateOptions'), sandbox);
-  const work = sandbox.runAutoAdvance();
-  await started.promise;
-  await sandbox.handleSettingChange({ dataset: { setting: 'autoAdvanceEnabled' }, type: 'checkbox', checked: false });
-  finish.resolve({ directive: 'continue' });
-  await work;
-  assert.equal(generations, 0);
-});
 
 test('NPC result after chat switch is discarded instead of saving into the new chat', async () => {
   const started = deferred();

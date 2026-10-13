@@ -7,7 +7,7 @@ import { createMemoryStorage } from '../core/storage.js';
 import { buildStoryContext } from '../core/story-context.js';
 import { buildMemoryDatabase, formatMemoryDatabase, memorySchemaForPrompt, validateMemoryChanges } from '../core/memory-database.js';
 import { fingerprintMessage, isControlMessage, validSummaries, truncateToTokenBudget, estimateTokens } from '../core/privacy-payload.js';
-import { requestFloorSummaries, requestStoryOptions, requestAdvanceDirective } from '../core/api-client.js';
+import { requestFloorSummaries, requestStoryOptions, requestNextPlan } from '../core/api-client.js';
 
 const change = (table, id, values) => ({ table, id, values });
 const row = (floor, summary, changes = []) => ({ floor, summary, changes });
@@ -103,7 +103,7 @@ test('malformed memory output is repaired once; permanent failure retains prior 
 test('structured response accepts fenced objects and single floor envelopes but rejects unknown fields', async () => {
   const payload = { memorySchema: memorySchemaForPrompt(), targetFloors: [{ floor: 3, text: 'scene' }] };
   const rows = await requestFloorSummaries(async () => '<think>reasoning</think>\n```json\n' + JSON.stringify(row(3, '到了书房。', [sceneA])) + '\n```', payload);
-  assert.equal(rows[0].memoryVersion, 1);
+  assert.equal(rows[0].memoryVersion, 2);
   assert.throws(() => validateMemoryChanges([change('scene', 'current', { guessed: 'wrong' })]), /字段/);
   assert.throws(() => validateMemoryChanges([change('unknown', 'x', { name: 'wrong' })]), /表格/);
   assert.throws(() => validateMemoryChanges([change('scene', '__proto__', { location: 'wrong' })]), /标识/);
@@ -122,14 +122,14 @@ test('real assistance assembly waits for memory and passes current tables to opt
   await h.engine.reconcile({ queueMissing: true });
   const source = await fs.readFile(new URL('../index.js', import.meta.url), 'utf8');
   const section = source.slice(source.indexOf('async function addSemanticRecall('), source.indexOf('\nasync function semanticRecallInterceptor('));
-  const sandbox = { engine: h.engine, captureChatTask: () => ({ isCurrent: () => true }), queuePendingSummaries() {},
+  const sandbox = { engine: h.engine, captureChatTask: () => ({ isCurrent: () => true }), queuePendingSummaries() {}, recallOn: () => false,
     getContext: () => h.context, getSettings: () => ({ semanticRecallEnabled: false }), validSummaries, isControlMessage, truncateToTokenBudget, formatMemoryDatabase };
   vm.createContext(sandbox); vm.runInContext(section, sandbox);
   const payload = await sandbox.addSemanticRecall({ rollingSummary: 'STALE_TEXT', recentFloors: [] });
   assert.match(payload.currentMemory, /书房/); assert.doesNotMatch(payload.rollingSummary, /STALE_TEXT/);
   const calls = [];
   await requestStoryOptions(async (request) => { calls.push(request); return JSON.stringify({ options: ['查书桌', '问沈砚', '看钥匙', '查走廊'] }); }, payload, { count: 4 });
-  await requestAdvanceDirective(async (request) => { calls.push(request); return JSON.stringify({ directive: '让沈砚说明家书线索', continuityCheck: '仍在书房' }); }, payload);
+  await requestNextPlan(async (request) => { calls.push(request); return JSON.stringify({ ways: ['present'], plan: '让沈砚说明家书线索' }); }, payload, { watch: { ways: [] } });
   for (const request of calls) assert.match(request.messages[1].content, /书房.*|寻找家书/);
 });
 

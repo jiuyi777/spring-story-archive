@@ -73,3 +73,57 @@ export function isPreferenceQuizComplete(answers) {
     return Number.isFinite(value) && value >= 1 && value <= 5;
   });
 }
+
+// ---- 题材与口味 --------------------------------------------------------------
+// Grouped the way Chinese web-fiction readers already sort themselves: 男频 and
+// 女频 categories as on 起点 and 晋江, plus genres both sides read. Multi-select;
+// "无限流" is listed on both sides because the two traditions differ a lot.
+export const GENRE_GROUPS = Object.freeze([
+  { id: 'male', label: '男频向', genres: [
+    { id: 'xuanhuan', label: '玄幻' }, { id: 'xianxia', label: '仙侠修真' }, { id: 'wuxia', label: '武侠' },
+    { id: 'urban', label: '都市' }, { id: 'history', label: '历史架空' }, { id: 'scifi', label: '科幻' },
+    { id: 'apocalypse', label: '末世求生' }, { id: 'infinite_m', label: '无限流（主神空间、轮回小队、强化升级）' },
+    { id: 'system', label: '系统流' }, { id: 'game', label: '网游竞技' }, { id: 'military', label: '军事战争' },
+  ] },
+  { id: 'female', label: '女频向', genres: [
+    { id: 'ancient_romance', label: '古代言情' }, { id: 'modern_romance', label: '现代言情' }, { id: 'palace', label: '宫斗宅斗' },
+    { id: 'infinite_f', label: '无限流（副本解谜、恐怖求生、感情线并重）' }, { id: 'quick_travel', label: '快穿' },
+    { id: 'transmigration', label: '穿书 / 重生' }, { id: 'farming', label: '种田经营' }, { id: 'campus', label: '校园青春' },
+    { id: 'showbiz', label: '娱乐圈' }, { id: 'xianxia_f', label: '仙侠言情' },
+  ] },
+  { id: 'shared', label: '通用', genres: [
+    { id: 'mystery', label: '悬疑推理' }, { id: 'horror', label: '恐怖灵异' }, { id: 'rules', label: '规则怪谈' },
+    { id: 'cthulhu', label: '克苏鲁' }, { id: 'western_fantasy', label: '西幻' }, { id: 'cyberpunk', label: '赛博朋克' },
+    { id: 'slice_of_life', label: '日常治愈' }, { id: 'ensemble', label: '群像' }, { id: 'danmei', label: '纯爱（耽美）' },
+    { id: 'baihe', label: '百合' }, { id: 'no_cp', label: '无 CP' },
+  ] },
+]);
+
+export const TASTE_QUESTIONS = Object.freeze([
+  { id: 'sweetness', label: '甜还是虐', choices: ['纯甜', '偏甜', '甜虐交织', '偏虐', '不在意'] },
+  { id: 'romance', label: '感情线', choices: ['不要感情线', '慢热', '明确的恋爱主线', '暧昧拉扯', '不在意'] },
+  { id: 'ending', label: '结局偏好', choices: ['HE', '开放式', 'BE 也可以', '不在意'] },
+  { id: 'protagonist', label: '主角处境', choices: ['一路变强', '普通人挣扎求生', '智斗与博弈', '被卷入大事件', '不在意'] },
+  { id: 'pace', label: '节奏', choices: ['慢热细腻', '张弛有度', '快节奏高密度', '不在意'] },
+]);
+
+// Self-reported only: the official MBTI questionnaire is proprietary, so the
+// player picks the type they already know. Used as a light hint, never a label.
+export const MBTI_TYPES = Object.freeze(['INTJ', 'INTP', 'ENTJ', 'ENTP', 'INFJ', 'INFP', 'ENFJ', 'ENFP', 'ISTJ', 'ISFJ', 'ESTJ', 'ESFJ', 'ISTP', 'ISFP', 'ESTP', 'ESFP']);
+
+export function genreLabels(ids = []) {
+  const wanted = new Set(ids);
+  return GENRE_GROUPS.flatMap((group) => group.genres.filter((genre) => wanted.has(genre.id)).map((genre) => genre.label));
+}
+
+export function describeTasteSettings({ genres = [], tastes = {}, mbti = '' } = {}) {
+  const parts = [];
+  const labels = genreLabels(genres);
+  if (labels.length) parts.push(`喜欢的题材：${labels.join('、')}`);
+  for (const question of TASTE_QUESTIONS) {
+    const answer = tastes?.[question.id];
+    if (answer && answer !== '不在意') parts.push(`${question.label}：${answer}`);
+  }
+  if (MBTI_TYPES.includes(mbti)) parts.push(`自述 MBTI：${mbti}（仅作参考）`);
+  return parts.join('；');
+}

@@ -6,7 +6,7 @@ import {
   listOpenAiCompatibleModels,
   modelsEndpointForChatEndpoint,
   parseJsonEnvelope,
-  requestAdvanceDirective,
+  requestNextPlan,
   requestCompression,
   requestFloorSummary,
   requestFloorSummaries,
@@ -152,12 +152,12 @@ test('preference, NPC and advance prompts keep player control and continuity', a
     prompts.push(messages[0].content);
     if (prompts.length === 1) return JSON.stringify({ summary: '玩家偏好调查与慢热关系。', storyNeeds: [], preferredDevelopments: [], avoidPatterns: [], directorRules: [] });
     if (prompts.length === 2) return JSON.stringify({ name: '林素', age: '34 岁', lifeStage: '重建职业信誉', occupation: '档案保管人', plotFunction: '情报源', currentGoal: '保住旧宅', objectiveFacts: ['持有旧登记簿'], biography: ['错误证词曾伤害无辜者'], personality: '谨慎', contradictions: ['希望被信任，却难以相信口头证词'], personalityFormation: ['错误证词使她重视证据链'], independentWill: ['不出卖家人'], relationships: [], growthState: ['正在决定是否公开旧案'], playerMemory: ['玩家拒绝被代替决定'] });
-    return JSON.stringify({ continuityCheck: '时间仍为暮春傍晚', directive: '让门外的访客提及旧地图。' });
+    return JSON.stringify({ ways: ['present'], plan: '让门外的访客提及旧地图。', event: '' });
   };
   const payload = { rollingSummary: '', recentFloors: [] };
   const profile = await requestPlayerPreferenceProfile(provider, payload, { pace: 'slow' });
   const npc = await requestNpcProfile(provider, payload, { brief: '', playerProfile: profile, existingNpcs: [] });
-  const advance = await requestAdvanceDirective(provider, payload, { playerProfile: profile, npcProfiles: [npc] });
+  const advance = await requestNextPlan(provider, payload, { watch: { ways: [{ id: 'present', name: '在场人物主动' }] }, avoid: '旧安排' });
   assert.match(prompts[0], /不得进行心理诊断/);
   assert.match(prompts[1], /不是只为玩家服务的工具人/);
   assert.match(prompts[1], /禁止设计固定口癖、固定小动作/);
@@ -165,8 +165,10 @@ test('preference, NPC and advance prompts keep player control and continuity', a
   assert.doesNotMatch(prompts[1], /玩家选择.*剧情功能/);
   assert.equal(npc.occupation, '档案保管人');
   assert.deepEqual(npc.biography, ['错误证词曾伤害无辜者']);
-  assert.match(prompts[2], /先校对时间、地点/);
-  assert.equal(advance.continuityCheck, '时间仍为暮春傍晚');
+  assert.match(prompts[2], /不跳时、不瞬移/);
+  assert.match(prompts[2], /不要再用这个安排：旧安排/);
+  assert.doesNotMatch(prompts[2], /不替玩家/);
+  assert.equal(advance.plan, '让门外的访客提及旧地图。');
 });
 
 test('automatic NPC director can decide that no new NPC is needed', async () => {

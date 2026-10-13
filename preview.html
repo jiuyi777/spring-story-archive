@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>春序档案 · 视觉预览</title>
-  <link rel="stylesheet" href="style.css?v=0.7.1">
+  <link rel="stylesheet" href="style.css?v=0.7.2">
   <style>
     html, body { min-height: 100%; margin: 0; background: linear-gradient(145deg, #253a32, #557265); }
     .preview-note { position: fixed; left: 18px; bottom: 18px; z-index: 1; color: rgba(255,255,255,.65); font: 12px/1.5 system-ui; }
@@ -13,7 +13,7 @@
 <body>
   <p class="preview-note">春序档案 · 静态视觉预览</p>
   <script type="module">
-    import { createArchiveShell, focusLatestFloor, renderModelOptions, renderNpcs, renderPlayerProfile, renderRecallState, renderSnapshot, resetPreferenceTest, setOpen, setRetestConfirmOpen, switchTab, syncSettings } from './ui/view.js?v=0.7.1';
+    import { createArchiveShell, focusLatestFloor, renderModelOptions, renderNpcs, renderPlayerProfile, renderRecallState, renderSnapshot, resetPreferenceTest, setOpen, setRetestConfirmOpen, switchTab, syncSettings } from './ui/view.js?v=0.7.2';
     const root = createArchiveShell();
     root.querySelector('[data-api-profile="select"]').innerHTML = '<option>主用接口</option><option>备用接口</option>';
     root.querySelector('[data-api-profile="name"]').value = '主用接口';
@@ -49,7 +49,7 @@
     });
     setOpen(root, true);
     const initialTab = new URLSearchParams(location.search).get('tab');
-    if (['database', 'sending', 'settings', 'preference-test'].includes(initialTab)) switchTab(root, initialTab);
+    if (['database', 'people', 'player', 'sending', 'settings', 'preference-test'].includes(initialTab)) switchTab(root, initialTab);
     const previewSnapshot = {
       totalFloors: 7,
       rollup: {
@@ -155,20 +155,65 @@
     renderPreview();
     const { renderMemoryDatabase } = await import('./ui/memory-view.js');
     const previewMemory = { updatedFloors: 6, tables: {
+      player: [{id:'节奏',floorIndex:0,values:{topic:'节奏',kind:'喜欢',content:'慢热，别急着推感情线'}},{id:'决定权',floorIndex:2,values:{topic:'决定权',kind:'要求',content:'不要替我说话或做决定'}}],
       scene: [{id:'current',floorIndex:5,values:{time:'雨夜',location:'旧宅档案室'}}],
       characters: [{id:'林素',floorIndex:5,values:{name:'林素',state:'核对登记簿',location:'旧宅档案室'}},{id:'沈砚',floorIndex:4,values:{name:'沈砚',location:'西廊',state:'等待会面'}}],
-      inventory: [{id:'登记簿',floorIndex:5,values:{name:'登记簿',owner:'林素',quantity:'1'}}],
+      inventory: [{id:'登记簿',floorIndex:5,values:{name:'登记簿',owner:'林素',holder:'林素',quantity:'1',place:'档案室木柜'}},{id:'沈砚:钥匙',floorIndex:4,values:{name:'西廊钥匙',owner:'沈砚',holder:'林素',quantity:'1',state:'借来开档案柜'}}],
+      tasks: [{id:'核对',floorIndex:5,values:{name:'核对登记簿',owner:'林素',participants:'林素、沈砚',deadline:'天亮前',state:'进行中'}}],
+      clues: [{id:'旧信',floorIndex:5,values:{name:'未拆旧信',detail:'沈砚说信是三年前寄出的',people:'沈砚',basis:'沈砚的说法',knownBy:'沈砚、林素',state:'未解决'}}],
       relationships: [{id:'林素:沈砚',floorIndex:5,values:{from:'林素',to:'沈砚',relation:'旧识'}}]
     } };
     renderMemoryDatabase(root, previewMemory);
+    const { renderTablePages } = await import('./ui/memory-view.js');
+    const { renderOptionSlots } = await import('./ui/option-slots.js');
+    const { presetSlots } = await import('./core/play-prompts.js');
+    renderOptionSlots(root, [...presetSlots(6), { label: '心声', count: 1, rule: '写玩家角色此刻没说出口的一句心里话，不超过 20 字。' }]);
+    renderTablePages(root, previewMemory);
     root.addEventListener('change', event => { if (event.target.matches('[data-role="memory-table-select"]')) renderMemoryDatabase(root,previewMemory,{force:true}); });
     root.addEventListener('input', event => { if (event.target.matches('[data-role="memory-search"]')) renderMemoryDatabase(root,previewMemory,{force:true}); });
-    const { renderSendHistory } = await import('./ui/send-view.js');
+    const { renderOverview } = await import('./ui/overview-view.js');
+    const previewRecall = new URLSearchParams(location.search).get('recall');
+    renderOverview(root, {
+      summaries: [...previewSnapshot.summaries, { floorIndex: 6, status: 'missing' }],
+      settings: { optionsEnabled: true, extraEndpoint: previewRecall ? 'https://example.com/v1/chat/completions' : '', recallEmbeddingModel: previewRecall ? 'text-embedding-3-small' : '', semanticRecallEnabled: previewRecall === 'on' },
+      recall: previewRecall === 'on' ? { phase: 'injected', indexedCount: 6, recalledFloors: [1, 3] } : null,
+    });
+    const { renderHero } = await import('./ui/hero.js?v=0.7.2');
+    renderHero(root, { floor: 8, scene: '雨夜，旧宅档案室', chat: '林素' });
+    const { renderPushCard } = await import('./ui/push-card.js');
+    renderPushCard(root, {
+      enabled: true,
+      round: { source: 'api', ways: ['present'], text: '' },
+      text: '沈砚从西廊回来，手里拿着被撕走的那一页，却不肯说是在哪找到的。',
+      goal: '慢慢揭开三年前登记簿缺页的真相',
+      history: [
+        { floor: 3, ways: ['deadlines'], plan: '林素提醒：明早档案就要移交，今晚是最后的机会。', source: 'api' },
+        { floor: 5, ways: ['offscreen', 'clues'], plan: '', source: 'local' },
+        { floor: 7, ways: [], skipped: true },
+      ],
+    });
+    const { renderPromptViewer, selectRecord, filterPromptRows } = await import('./ui/prompt-view.js');
+    const lines = ['推门进了旧宅。','林素抬头，示意你把伞放在门边。','问她登记簿里少了哪一页。','她翻到中间，指着被撕掉的地方：“三年前就没了。”','那就去西廊找沈砚。','沈砚不在，只有一盏还温着的灯。','把灯提起来照照墙。','墙上有新刮的痕迹，像是有人刚搬走了什么。'];
+    const demoChat = lines.map((mes, i) => ({ mes, is_user: i % 2 === 0, name: i % 2 ? '林素' : '玩家' }));
+    const finalPrompt = [
+      { role: 'system', content: '你是林素，旧宅档案室的保管人。以下是角色设定……（预设与角色卡内容）' },
+      { role: 'system', content: '【春序档案 · 剧情总摘要】\n以下是本聊天已经发生的剧情……\n\n【玩家本人说过的话】\n【玩家】主题：节奏；类别：喜欢；内容：慢热，别急着推感情线\n\n【当前剧情状态】\n【时间地点】时间：雨夜；地点：旧宅档案室\n【人物档案】姓名：林素；当前状态：核对登记簿\n\n【角色回复】第 2 楼：林素示意玩家把伞放在门边。' },
+      ...demoChat.slice(2).map((m) => ({ role: m.is_user ? 'user' : 'assistant', content: m.mes })),
+      { role: 'system', content: '【剧情选项】\n每次写完正文后，必须在回复末尾输出一组剧情选项……' },
+    ];
+    const demoRecords = [{ key: 'demo-1', targetFloor: 9, type: 'normal', startedAt: '2026-10-13T13:58:00+08:00', finalPrompt, budget: { limit: 6000, story: 412, recall: 0, dropped: { duplicate: 1, budget: 0 } }, memories: [{ table: 'player', id: '节奏' }, { table: 'characters', id: '林素' }] }];
+    const countTokens = async (text) => ({ value: Math.ceil(text.length * 0.75), exact: false });
+    const showViewer = () => renderPromptViewer(root, { records: demoRecords, chat: demoChat, floorTexts: demoChat.map((m) => m.mes), database: previewMemory, countTokens });
+    showViewer();
+    root.addEventListener('input', (event) => { if (event.target.matches('[data-role="prompt-search"]')) filterPromptRows(root, event.target.value); });
+    const { renderSendHistory: renderSendHistoryOnly } = await import('./ui/send-view.js');
+    const renderSendHistory = (target, records) => { renderSendHistoryOnly(target, records); renderOverview(target, { sends: records }); };
     renderSendHistory(root, [
       {key:'example-2',targetFloor:7,type:'swipe',startedAt:'2026-10-09T10:01:00+08:00',status:'received',verified:true,includedFloors:[0,1,2,3,4,5],removedFloors:[0],rawFloors:[{floorIndex:5,role:'玩家',text:'去档案室找林素核对登记簿。'}],memories:[{label:'人物档案',text:'林素 · 档案保管人',reason:'当前交互对象'},{label:'物品资源',text:'登记簿 · 林素持有',reason:'正文明确提及'}],summaryPrompt:'【当前剧情状态】\n雨夜，旧宅档案室。林素持有登记簿。\n【相关往事】\n林素答应核对被修改的日期。',note:'界面示例记录，用于展示展开内容。'},
       {key:'example-1',targetFloor:7,type:'normal',startedAt:'2026-10-09T10:00:00+08:00',status:'stopped',verified:false,includedFloors:[0,1,2],removedFloors:[],rawFloors:[],summaryPrompt:'雨夜，旧宅。',note:'界面示例：这次请求被停止。'}
     ]);
-    syncSettings(root, {
+    root.addEventListener("change", (event) => { if (event.target.matches("[data-setting=\"uiTheme\"]")) root.dataset.ssaTheme = event.target.value; });
+    syncSettings(root, { uiTheme: new URLSearchParams(location.search).get("theme") || "chunlai", heroArt: new URLSearchParams(location.search).get("art") || "night",
       autoSummarize: true,
       summarySource: 'current',
       rollupTokenLimit: 6000,

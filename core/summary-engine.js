@@ -6,9 +6,11 @@ import {
   validSummaries,
   splitInputText,
   isControlMessage,
-} from './privacy-payload.js?v=0.7.1';
-import { createProvider, requestCompression, requestFloorSummaries } from './api-client.js?v=0.7.1';
-import { MEMORY_VERSION, buildMemoryDatabase, formatMemoryDatabase, memorySchemaForPrompt, validateMemoryChanges, applyNarrativeEdits } from './memory-database.js?v=0.7.1';
+  storyText,
+  messageStoryText,
+} from './privacy-payload.js?v=0.7.2';
+import { createProvider, requestCompression, requestFloorSummaries } from './api-client.js?v=0.7.2';
+import { MEMORY_VERSION, isCompatibleMemoryVersion, buildMemoryDatabase, formatMemoryDatabase, memorySchemaForPrompt, validateMemoryChanges, applyNarrativeEdits } from './memory-database.js?v=0.7.2';
 
 function nowIso() {
   return new Date().toISOString();
@@ -86,6 +88,14 @@ export class SummaryEngine {
     getSettings,
     getExtraCredentials,
     onChange = () => {},
+    // 八股删除器 hooks: which sentences of a reply need rewording, and how to
+    // write the reworded sentences back. Both default to doing nothing.
+    clicheSentencesFor = () => [],
+    applyFloorRewrites = async () => null,
+    // Push hooks: what the organizing call needs to plan the next round (null
+    // when push is off or the batch is old floors), and where the plan goes.
+    getAdvanceWatch = async () => null,
+    onAdvancePlan = async () => {},
     requestDelayMs = 1800,
     wait = (delay) => new Promise((resolve) => setTimeout(resolve, delay)),
   }) {
@@ -94,6 +104,10 @@ export class SummaryEngine {
     this.getSettings = getSettings;
     this.getExtraCredentials = getExtraCredentials;
     this.onChange = onChange;
+    this.clicheSentencesFor = clicheSentencesFor;
+    this.applyFloorRewrites = applyFloorRewrites;
+    this.getAdvanceWatch = getAdvanceWatch;
+    this.onAdvancePlan = onAdvancePlan;
     this.chatKey = '';
     this.chatRevision = 0;
     this.queue = [];
@@ -207,7 +221,7 @@ export class SummaryEngine {
     const summaries = await this.storage.listSummaries(this.chatKey);
     if (revision !== this.chatRevision) return { busy: false, queuedCount: 0, remainingCount: 0, totalMissing: 0 };
     const missing = summaries
-      .filter((record) => ['missing', 'failed'].includes(record.status) || (record.status === 'ready' && (record.inputComplete !== true || record.memoryVersion !== MEMORY_VERSION)))
+      .filter((record) => ['missing', 'failed'].includes(record.status) || (record.status === 'ready' && (record.inputComplete !== true || !isCompatibleMemoryVersion(record.memoryVersion))))
       .filter((record) => !this.currentBatch.includes(record.floorIndex) && !this.queue.includes(record.floorIndex))
       .sort((left, right) => left.floorIndex - right.floorIndex);
     const batchSize = Math.min(20, Math.max(1, Number(limit) || 10));
@@ -397,19 +411,26 @@ export class SummaryEngine {
           });
           continue;
         }
-        const { floor: ignored, ...summary } = result;
+        const { floor: ignored, rewrites, ...summary } = result;
+        // Reworded sentences change the reply text, so the stored fingerprint
+        // must follow it or the floor would be queued for organizing again.
+        const rewrittenFingerprint = rewrites?.length ? await this.applyFloorRewrites(record.floorIndex, rewrites) : null;
         await this.storage.putSummary({
           ...record,
           status: 'ready',
           previous: undefined,
           inputComplete: true,
           ...summary,
+          ...(rewrittenFingerprint ? { messageFingerprint: rewrittenFingerprint } : {}),
           error: '',
           updatedAt: nowIso(),
         });
         readyCount += 1;
       }
       if (!isCurrent()) return { skipped: true };
+      if (results.next) {
+        try { await this.onAdvancePlan(results.next, Math.max(...batch)); } catch { /* A plan is optional; the local pick covers it. */ }
+      }
       const rollupResult = await this.refreshRollup({ allowCompression: true });
       await this.onChange();
       return { ready: readyCount > 0, readyCount, rateLimited: rollupResult?.rateLimited };
@@ -435,10 +456,23 @@ export class SummaryEngine {
 
   async requestCompleteSummaries(provider, chat, batch, rollingSummary, isCurrent) {
     const memory = await this.getMemory({ throughFloor: batch[0] - 1 });
+    let advanceWatch = null;
+    try { advanceWatch = await this.getAdvanceWatch(batch); } catch { advanceWatch = null; }
+    const npcWatch = this.getSettings?.().autoNpcEnabled && this.storage.listNpcs
+      ? { existingNpcs: (await this.storage.listNpcs(this.chatKey)).map((npc) => npc.name).filter(Boolean).slice(-12) }
+      : null;
     const makePayload = (inputChat, indexes) => {
       const payload = buildSummaryBatchPayload({ chat: inputChat, floorIndexes: indexes, rollingSummary, inputTokenLimit: 5400 });
       payload.memorySchema = memorySchemaForPrompt();
       payload.currentMemory = formatMemoryDatabase(memory, { budget: 500, includeIds: true, query: batch.map((index) => chat[index]?.mes ?? '').join('\n') });
+      if (npcWatch) payload.npcWatch = npcWatch;
+      if (advanceWatch) payload.advanceWatch = advanceWatch;
+      const summaryFormat = String(this.getSettings?.().summaryFormat ?? '').trim();
+      if (summaryFormat) payload.summaryFormat = summaryFormat.slice(0, 600);
+      const clicheRewrite = indexes
+        .map((index) => ({ floor: index + 1, sentences: inputChat[index]?.is_user ? [] : this.clicheSentencesFor(inputChat[index], index) }))
+        .filter((item) => item.sentences.length);
+      if (clicheRewrite.length) payload.clicheRewrite = clicheRewrite;
       return payload;
     };
     let payload;
@@ -446,7 +480,7 @@ export class SummaryEngine {
     if (payload) return requestFloorSummaries(provider, payload);
     const results = [];
     for (const floorIndex of batch) {
-      const text = String(chat[floorIndex].mes ?? '');
+      const text = messageStoryText(chat[floorIndex]);
       const parts = splitInputText(text, (part) => JSON.stringify({ text: part }), 2500);
       const summaries = [];
       const segments = parts.length ? parts : [''];
@@ -464,6 +498,7 @@ export class SummaryEngine {
         summary: summaries.map((item) => item.summary).join('\n'),
         memoryVersion: MEMORY_VERSION,
         memoryChanges: summaries.flatMap((item) => item.memoryChanges ?? []),
+        ...(summaries.some((item) => item.npcSignal) ? { npcSignal: summaries.find((item) => item.npcSignal?.needed)?.npcSignal ?? summaries.find((item) => item.npcSignal).npcSignal } : {}),
         ...Object.fromEntries(['timeline', 'characters', 'relationships', 'clues'].map((field) => [field, summaries.flatMap((item) => item[field])])),
       });
     }
@@ -627,7 +662,7 @@ export class SummaryEngine {
     const key = `${chatKey}::memory-edits`;
     const profile = await this.storage.getProfile(key);
     if (revision !== this.chatRevision) throw new Error('聊天已切换，请重新保存。');
-    const edit = { ...valid, floorIndex: Math.max(0, this.getContext().chat.length - 1) };
+    const edit = { ...valid, schemaVersion: MEMORY_VERSION, floorIndex: Math.max(0, this.getContext().chat.length - 1) };
     const edits = (profile?.edits ?? []).filter((item) => !(item.table === edit.table && item.id === edit.id && item.floorIndex === edit.floorIndex));
     await this.storage.putProfile({ key, chatKey, kind: 'memory-edits', edits: [...edits, edit] });
     if (revision !== this.chatRevision) return;

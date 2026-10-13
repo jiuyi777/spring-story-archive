@@ -30,6 +30,6 @@
       try { const payload = JSON.parse(body.messages.at(-1).content); content = JSON.stringify({ floors: payload.targetFloors.map(({ floor }) => ({ floor, summary: '林素在图书馆找到登记簿。', changes: [{table:'scene',id:'current',values:{location:'图书馆',situation:'找到登记簿'}},{table:'characters',id:'林素',values:{name:'林素',state:'持有登记簿'}}] })) }); } catch {}
       return Response.json({ choices: [{ message: { content } }] });
     };
-    await import('../index.js?v=0.7.1');
+    await import('../index.js?v=0.7.2');
   }
 </script></html>

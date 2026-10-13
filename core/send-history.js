@@ -1,4 +1,4 @@
-import { fingerprintMessage } from './privacy-payload.js?v=0.7.1';
+import { fingerprintMessage } from './privacy-payload.js?v=0.7.2';
 
 export function createSendHistory({ storage, chatKey, chat, promptChat, type, onChange = () => {} }) {
   const rows = chat.map((message, floorIndex) => ({ message, floorIndex })).filter(({ message }) => !message.is_system || message.extra?.tool_invocations);
@@ -30,6 +30,18 @@ export function createSendHistory({ storage, chatKey, chat, promptChat, type, on
       record.rawFloors = record.rawFloors.filter((_, index) => !removed.has(index));
       persist();
     },
+    // The exact request the host assembled: every message, in order.
+    final(messages) {
+      if (terminal || !Array.isArray(messages)) return;
+      record.finalPrompt = messages;
+      record.finalAt = new Date().toISOString();
+      persist();
+    },
+    budget(value) {
+      if (terminal) return;
+      record.budget = value;
+      persist();
+    },
     recall(prompt, records) {
       if (terminal) return;
       record.recallPrompt = prompt || '';
@@ -53,4 +65,29 @@ export function createSendHistory({ storage, chatKey, chat, promptChat, type, on
     },
     idle: () => chain,
   };
+}
+
+// The host hands over either a message list (chat completion) or one string
+// (text completion). Both become [{ role, content }] for the viewer.
+export function normalizeFinalPrompt(prompt) {
+  const text = (content) => {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) return content.map((part) => (typeof part === 'string' ? part : part?.text ?? (part?.type === 'image_url' ? '[图片]' : ''))).filter(Boolean).join('\n');
+    if (content && typeof content === 'object') return String(content.text ?? content.content ?? '');
+    return '';
+  };
+  if (typeof prompt === 'string') return [{ role: 'prompt', content: prompt }];
+  if (!Array.isArray(prompt)) return null;
+  return prompt.filter((item) => item && typeof item === 'object').map((item) => ({ role: String(item.role ?? 'system'), name: item.name ? String(item.name) : undefined, content: text(item.content) }));
+}
+
+// Full prompts are large; only the newest few sends of a chat keep theirs.
+export async function pruneFinalPrompts(storage, chatKey, keep = 10) {
+  const records = (await storage.listSendRecords(chatKey)).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  for (const record of records.slice(keep)) {
+    if (!record.finalPrompt) continue;
+    const { finalPrompt, ...rest } = record;
+    void finalPrompt;
+    await storage.putSendRecord({ ...rest, finalPromptPruned: true });
+  }
 }

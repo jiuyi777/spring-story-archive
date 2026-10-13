@@ -12,6 +12,18 @@ function normalizeText(value) {
   return String(value ?? '').replace(/\u0000/g, '').trim();
 }
 
+// The story-options block stays in the reply for display, but it is not story:
+// remote requests (organizing, recall) read the reply without it. Fingerprints
+// keep using the full text so existing records stay valid.
+const OPTIONS_BLOCK = /\s*<chunxu-options>[\s\S]*?(?:<\/chunxu-options>|$)/gi;
+export function storyText(value) {
+  return normalizeText(String(value ?? '').replace(OPTIONS_BLOCK, ''));
+}
+
+export function messageStoryText(message) {
+  return storyText(message?.mes);
+}
+
 export function fingerprintMessage(message, floorIndex) {
   const source = JSON.stringify({
     floorIndex,
@@ -102,7 +114,7 @@ export function buildPrivacyPayload({
   const perFloorBudget = selectedFloors.length ? Math.max(160, Math.floor(rawBudget / selectedFloors.length)) : 0;
   let contentTruncated = false;
   const recentFloors = selectedFloors.map((message, offset) => {
-    const sourceText = normalizeText(message?.mes);
+    const sourceText = messageStoryText(message);
     const text = truncateToTokenBudget(sourceText, perFloorBudget);
     if (text !== sourceText) contentTruncated = true;
     return {
@@ -149,7 +161,7 @@ export function buildSummaryBatchPayload({
     return {
       floorIndex,
       message,
-      sourceText: normalizeText(message?.mes),
+      sourceText: messageStoryText(message),
       speaker: message?.is_user ? 'player' : truncateToTokenBudget(normalizeText(message?.name) || 'character', 40),
     };
   });

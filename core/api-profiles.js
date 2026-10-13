@@ -31,8 +31,13 @@ export function openApiProfiles({ storage, session, legacy = {}, createId = () =
     try { session?.removeItem(LEGACY_KEY); } catch {}
   }
   const active = () => ({ ...state.profiles.find((profile) => profile.id === state.activeId) });
+  const get = (id) => {
+    const profile = state.profiles.find((item) => item.id === id);
+    return profile ? { ...profile } : null;
+  };
   return {
     active,
+    get,
     list: () => state.profiles.map(({ id, name }) => ({ id, name })),
     update(changes) {
       const values = Object.fromEntries(fields.filter((key) => key in changes).map((key) => [key, String(changes[key])]));

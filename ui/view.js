@@ -1,10 +1,13 @@
+import { ADVANCE_MODULES } from '../core/play-prompts.js?v=0.7.2';
+import { DEFAULT_CLICHE_RULES } from '../core/cliche-filter.js?v=0.7.2';
+import { GENRE_GROUPS, TASTE_QUESTIONS, MBTI_TYPES } from '../core/preference-quiz.js?v=0.7.2';
 import {
   PREFERENCE_QUIZ_ITEMS,
   PREFERENCE_QUIZ_SCALE,
   PREFERENCE_QUIZ_SOURCE,
   PREFERENCE_TRAIT_LABELS,
   STORY_EXPERIENCE_OPTIONS,
-} from '../core/preference-quiz.js?v=0.7.1';
+} from '../core/preference-quiz.js?v=0.7.2';
 
 const LAUNCHER_POSITION_KEY = 'spring-story-archive:launcher-position';
 const LAUNCHER_VIEWPORT_MARGIN = 6;
@@ -30,6 +33,24 @@ function storyExperienceMarkup() {
   `).join('');
 }
 
+function tasteMarkup() {
+  const genres = GENRE_GROUPS.map((group) => `
+    <div class="ssa-genre-group">
+      <span class="ssa-genre-group-label">${group.label}</span>
+      <div class="ssa-genre-chips">
+        ${group.genres.map((genre) => `<label class="ssa-genre-chip"><input type="checkbox" data-genre-id="${genre.id}"><span>${genre.label}</span></label>`).join('')}
+      </div>
+    </div>`).join('');
+  const questions = TASTE_QUESTIONS.map((question) => `
+    <fieldset class="ssa-taste-question">
+      <legend>${question.label}</legend>
+      <div class="ssa-genre-chips">
+        ${question.choices.map((choice) => `<label class="ssa-genre-chip"><input type="radio" name="ssa-taste-${question.id}" value="${choice}" data-taste-id="${question.id}"><span>${choice}</span></label>`).join('')}
+      </div>
+    </fieldset>`).join('');
+  return { genres, questions };
+}
+
 function preferenceQuizMarkup() {
   return PREFERENCE_QUIZ_ITEMS.map((item, index) => `
     <fieldset class="ssa-quiz-question">
@@ -51,6 +72,8 @@ function preferenceQuizMarkup() {
   `).join('');
 }
 
+import { renderHero, applyHeroArt, watchHeroScroll, HERO_ARTS } from './hero.js?v=0.7.2';
+
 export function createArchiveShell() {
   const root = document.createElement('div');
   root.id = 'spring_story_archive_root';
@@ -62,32 +85,42 @@ export function createArchiveShell() {
     </button>
     <div class="ssa-backdrop" data-action="close" hidden></div>
     <section class="ssa-app" role="dialog" aria-modal="true" aria-label="春序档案" hidden>
-      <header class="ssa-header">
-        <div>
-          <p class="ssa-eyebrow">剧情记忆数据库</p>
-          <h1><span aria-hidden="true">❀</span> 春序档案</h1>
+      <header class="ssa-header ssa-hero">
+        <div class="ssa-hero-art" aria-hidden="true">
+          <svg class="ssa-hero-mist" viewBox="0 0 390 200" preserveAspectRatio="none">
+            <path d="M0 96 C60 62 110 80 160 54 C210 30 260 62 310 42 C350 28 375 40 390 34 V200 H0Z" style="fill:var(--ssa-olive)" opacity=".55"/>
+            <path d="M0 128 C50 106 100 120 150 98 C200 78 240 108 300 90 C340 80 370 90 390 82 V200 H0Z" style="fill:var(--ssa-mist)" opacity=".8"/>
+            <path d="M0 158 C40 142 90 150 130 134 C180 116 230 144 280 128 C330 114 360 126 390 120 V200 H0Z" style="fill:var(--ssa-mid)"/>
+            <path d="M0 184 C70 170 120 178 190 164 C250 154 320 172 390 162 V200 H0Z" style="fill:var(--ssa-deep)"/>
+          </svg>
+        </div>
+        <div class="ssa-hero-text">
+          <p class="ssa-hero-kicker" data-role="hero-kicker">春序</p>
+          <h1 class="ssa-hero-title" data-role="hero-title">春序档案</h1>
+          <p class="ssa-hero-sub" data-role="hero-sub"></p>
         </div>
         <button class="ssa-icon-button" type="button" data-action="close" aria-label="关闭">×</button>
       </header>
 
       <nav class="ssa-tabs" aria-label="档案页面">
         <button type="button" data-tab="database">数据库</button>
+        <button type="button" data-tab="people">人物</button>
         <button class="is-active" type="button" data-tab="sending">楼层发送</button>
+        <button type="button" data-tab="player">玩家</button>
         <button type="button" data-tab="settings">设置</button>
       </nav>
 
       <main class="ssa-main">
         <section class="ssa-page" data-page="database">
-          <div class="ssa-page-heading"><div><p class="ssa-kicker">自动整理 · 按需调用</p><h2>数据库</h2></div><button type="button" class="ssa-secondary-button" data-action="backfill">同步记忆</button></div>
-          <article class="ssa-paper-card">
-            <h2>记忆档案</h2>
+          <div class="ssa-page-heading"><div><h2>数据库</h2><p class="ssa-page-note">剧情里发生过的事，按类别整理</p></div><button type="button" class="ssa-secondary-button" data-action="backfill">整理旧楼层</button></div>
+          <article class="ssa-memory-panel">
             <label>记忆表格<select data-role="memory-table-select"></select></label>
-            <label>查找记忆<input type="search" data-role="memory-search" placeholder="搜索人物、物品或相关事实"></label>
+            <label class="ssa-search"><span class="ssa-visually-hidden">查找记忆</span><input type="search" data-role="memory-search" placeholder="搜索名字或内容"></label>
             <p class="ssa-muted" data-role="memory-status">等待读取当前聊天记忆</p>
             <div data-role="memory-rows"></div>
-            <button class="ssa-secondary-button" type="button" data-action="add-memory-row">添加记忆条目</button>
+            <button class="ssa-secondary-button" type="button" data-action="add-memory-row">添加条目</button>
           </article>
-<details class="ssa-settings-group"><summary>剧情记录与来源楼层</summary><div class="ssa-group-body">          <details class="ssa-rollup-card">
+<details class="ssa-settings-group"><summary><span>逐楼记录</span><small>每一楼的整理状态、摘要和长篇总结</small></summary><div class="ssa-group-body">          <details class="ssa-rollup-card">
             <summary class="ssa-rollup-summary">
               <div>
                 <p class="ssa-kicker">长篇记忆</p>
@@ -126,13 +159,57 @@ export function createArchiveShell() {
           </div>
           <p class="ssa-muted">同一批楼层只调用一次摘要 API，返回后仍分别保存为逐楼摘要；内容过长时会自动拆批。</p>
           <div class="ssa-floor-list" data-role="floor-list"></div>
-        </div></details><details class="ssa-settings-group"><summary>NPC 扩展档案</summary><div class="ssa-group-body">          <div class="ssa-npc-list" data-role="npc-list">
+        </div></details>        </section>
+        <section class="ssa-page" data-page="people">
+          <div class="ssa-page-heading"><div><h2>人物</h2><p class="ssa-page-note">剧情里的每个人，包括插件生成的 NPC</p></div></div>
+          <article class="ssa-memory-panel">
+            <label class="ssa-search"><span class="ssa-visually-hidden">查找</span><input type="search" data-role="table-search" data-table="characters" placeholder="搜索名字或内容"></label>
+            <p class="ssa-muted" data-role="table-status" data-table="characters"></p>
+            <div class="ssa-table-rows" data-role="table-rows" data-table="characters"></div>
+            <button class="ssa-secondary-button" type="button" data-action="add-table-row" data-table="characters">添加人物</button>
+          </article>
+          <h3 class="ssa-section-title">插件生成的 NPC</h3>
+          <div class="ssa-npc-list" data-role="npc-list">
             <div class="ssa-empty-state"><p>当前聊天还没有由本插件生成的 NPC。</p></div>
           </div>
-        </div></details>        </section>
+        </section>
+        <section class="ssa-page" data-page="player">
+          <div class="ssa-page-heading"><div><h2>玩家</h2><p class="ssa-page-note">你本人说过的喜好、雷点、要求和决定，每轮最先发送</p></div></div>
+          <article class="ssa-memory-panel">
+            <label class="ssa-search"><span class="ssa-visually-hidden">查找</span><input type="search" data-role="table-search" data-table="player" placeholder="搜索名字或内容"></label>
+            <p class="ssa-muted" data-role="table-status" data-table="player"></p>
+            <div class="ssa-table-rows" data-role="table-rows" data-table="player"></div>
+            <button class="ssa-secondary-button" type="button" data-action="add-table-row" data-table="player">添加一条</button>
+          </article>
+          <h3 class="ssa-section-title">偏好测试</h3>
+          <p class="ssa-muted" data-role="taste-summary"></p>
+          <div class="ssa-player-preference">
+          <article class="ssa-advance-hero">
+            <div class="ssa-hero-mark" aria-hidden="true">春</div>
+            <div>
+              <h2>偏好测试</h2>
+              <p>10 道题加剧情体验多选，帮自主推进理解你想怎样体验故事。做一次就行，以后这里只显示结果。</p>
+            </div>
+          </article>
+
+          <section class="ssa-preference-entry" data-role="preference-entry">
+            <div>
+              <strong>还没有玩家偏好档案</strong>
+              <p>可完成 10 题测试和剧情体验多选，也可以直接依据当前聊天进行保守分析。</p>
+            </div>
+            <div class="ssa-entry-actions">
+              <button class="ssa-primary-button" type="button" data-action="open-preference-test">开始首次测试</button>
+              <button class="ssa-secondary-button" type="button" data-action="skip-preference-quiz">跳过测试</button>
+            </div>
+          </section>
+          <div class="ssa-result-card ssa-profile-card" data-role="preference-profile" hidden></div>
+          </div>
+        </section>
         <section class="ssa-page is-active" data-page="sending">
-          <div class="ssa-page-heading"><h2>最近的回复</h2><button type="button" class="ssa-secondary-button" data-action="refresh-send-records">刷新</button></div>
-          <p class="ssa-muted">点开一楼，看看这次带了什么记忆。</p>
+          <section class="ssa-overview" data-role="overview" aria-label="当前状态" aria-live="polite"></section>
+          <section class="ssa-push" data-role="push-card" aria-label="下一轮推进" hidden></section>
+          <section class="ssa-round" data-role="prompt-viewer" aria-label="实际发出的提示词"></section>
+          <div class="ssa-page-heading"><div><h2>全部发送记录</h2><p class="ssa-page-note">每次生成都单独记一条，重新生成的也在</p></div><button type="button" class="ssa-secondary-button" data-action="refresh-send-records">刷新</button></div>
           <div data-role="send-records"><p class="ssa-empty-state">还没有发送记录。下次在酒馆生成回复时自动记录。</p></div>
         </section>
         <section class="ssa-page ssa-test-page" data-page="preference-test">
@@ -158,14 +235,28 @@ export function createArchiveShell() {
             <div class="ssa-experience-grid">${storyExperienceMarkup()}</div>
           </section>
           <section class="ssa-test-section">
+            <div class="ssa-section-heading">
+              <div><p class="ssa-kicker">可多选</p><h2>喜欢的题材</h2></div>
+            </div>
+            <p class="ssa-muted">按网文的习惯分了男频、女频和通用。无限流两边都列了，因为两种写法差别很大。</p>
+            ${tasteMarkup().genres}
+          </section>
+          <section class="ssa-test-section">
+            <div class="ssa-section-heading">
+              <div><p class="ssa-kicker">单选，可不答</p><h2>口味</h2></div>
+            </div>
+            ${tasteMarkup().questions}
+            <label>你的 MBTI（知道就选，不知道就跳过）
+              <select data-setting="preferenceMbti">
+                <option value="">不知道 / 不填</option>
+                ${MBTI_TYPES.map((type) => `<option value="${type}">${type}</option>`).join('')}
+              </select>
+              <small>只作参考，不会拿来给你下定论；你在聊天里说的话永远优先。</small>
+            </label>
+          </section>
+          <section class="ssa-test-section">
             <label>其他想要或需要避免的内容
               <textarea rows="3" data-setting="preferenceNotes" placeholder="例如：想要慢热友情；避免强制玩家表态。"></textarea>
-            </label>
-            <label>分析接口
-              <select data-setting="preferenceSource">
-                <option value="current">酒馆当前 API</option>
-                <option value="extra">额外 API</option>
-              </select>
             </label>
             <button class="ssa-primary-button ssa-wide-button" type="button" data-action="analyze-preferences">完成测试并生成分析</button>
             <p class="ssa-quiz-source">${PREFERENCE_QUIZ_SOURCE.note} <a href="${PREFERENCE_QUIZ_SOURCE.permissionUrl}" target="_blank" rel="noopener noreferrer">公共领域说明</a></p>
@@ -173,8 +264,30 @@ export function createArchiveShell() {
         </section>
 
         <section class="ssa-page" data-page="settings">
-          <div class="ssa-page-heading"><div><p class="ssa-kicker">修改后自动保存</p><h2>设置</h2></div></div>
-<details class="ssa-settings-group"><summary>自动记忆与整理</summary><div class="ssa-group-body">
+          <div class="ssa-page-heading"><div><h2>设置</h2><p class="ssa-page-note">修改后自动保存</p></div></div>
+<details class="ssa-settings-group"><summary><span>外观</span><small>换一套色卡</small></summary><div class="ssa-group-body">
+          <fieldset class="ssa-theme-picker">
+            <legend class="ssa-visually-hidden">色卡</legend>
+            ${UI_THEMES.map((theme) => `
+            <label class="ssa-theme-option">
+              <input type="radio" name="ssa-ui-theme" value="${theme.id}" data-setting="uiTheme">
+              <span class="ssa-theme-swatches">${theme.colors.map((color) => `<i style="background:${color}"></i>`).join('')}</span>
+              <span class="ssa-theme-name"><strong>${theme.name}</strong><small>${theme.note}</small></span>
+            </label>`).join('')}
+          </fieldset>
+          <fieldset class="ssa-hero-picker">
+            <legend>顶部图片</legend>
+            ${HERO_ARTS.map((art) => `
+            <label class="ssa-hero-option" data-art="${art.id}">
+              <input type="radio" name="ssa-hero-art" value="${art.id}" data-setting="heroArt">
+              <span class="ssa-hero-thumb"${art.url ? ` style="background-image:url('${art.url}')"` : ''}></span>
+              <span class="ssa-theme-name"><strong>${art.name}</strong><small>${art.note}</small></span>
+            </label>`).join('')}
+          </fieldset>
+          <label data-role="hero-url" hidden>图片链接
+            <input type="url" data-setting="heroImageUrl" placeholder="https://… 填一张横图的地址">
+          </label>
+</div></details><details class="ssa-settings-group"><summary><span>自动记忆</span><small>什么时候整理新剧情，用哪个接口</small></summary><div class="ssa-group-body">
           <article class="ssa-paper-card">
             <p class="ssa-kicker">摘要与大总结</p>
             <h2>摘要方式</h2>
@@ -182,103 +295,117 @@ export function createArchiveShell() {
               <label>自动同步频率<select data-setting="memoryUpdateEvery"><option value="1">每轮回复</option><option value="2">每 2 轮</option><option value="3">每 3 轮</option><option value="5">每 5 轮</option></select></label>
               <label>积累多少内容后同步<input type="number" min="0" max="10000" step="100" data-setting="memoryMinTokens"><small>估算 token；0 表示立即同步。生成选项或推进时会先处理已积累的新楼层。</small></label>
             </div>
+            <label>春序每轮最多带入（token）
+              <input type="number" min="1000" max="1000000" step="1000" inputmode="numeric" data-setting="memoryTokenLimit">
+              <small>玩家记录、剧情状态、小结和回忆加起来不超过这个数。默认 20,000，最多 1,000,000，按你用的模型上下文填。放不下时先减回忆，再减较早的小结。</small>
+            </label>
+            <label>摘要格式（可选）
+              <textarea rows="3" data-setting="summaryFormat" placeholder="留空用默认写法：谁在何时何地做了什么、结果如何，一两句。&#10;例：【时间｜地点】人物：做了什么 → 结果"></textarea>
+              <small>每楼小结按这里的格式写。可以写模板，也可以直接说要求，比如“保留对白原话”“每条不超过 40 字”。</small>
+              <span class="ssa-format-presets">
+                <button type="button" class="ssa-text-button" data-action="summary-format-preset" data-format="">默认</button>
+                <button type="button" class="ssa-text-button" data-action="summary-format-preset" data-format="【时间｜地点】人物：做了什么 → 结果">时间地点人物</button>
+                <button type="button" class="ssa-text-button" data-action="summary-format-preset" data-format="一句话写清发生了什么；人物说过的关键台词用原话加引号保留。">保留原话</button>
+                <button type="button" class="ssa-text-button" data-action="summary-format-preset" data-format="事件：…&#10;变化：人物关系、物品或状态的变化&#10;伏笔：留下的悬念（没有就省略）">事件／变化／伏笔</button>
+              </span>
+            </label>
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>自动记录新楼层</strong><small>只摘要之后新增、编辑或重选的楼层；旧楼层由“补全下一批”分批处理。</small></span>
+              <span class="ssa-switch-copy"><strong>自动记录新楼层</strong><small>新回复、编辑过或重新生成的楼层自动整理。</small></span>
               ${switchControlMarkup('autoSummarize', '自动记录新楼层')}
             </label>
-            <label>摘要使用接口
-              <select data-setting="summarySource">
-                <option value="current">酒馆当前 API</option>
-                <option value="extra">额外 API</option>
-              </select>
+            <label class="ssa-switch-row">
+              <span class="ssa-switch-copy"><strong>自动整理旧楼层</strong><small>打开一个还没整理过的聊天时，在后台一批一批补上摘要，不用手动点。换聊天或关掉这个开关会立刻停下。</small></span>
+              ${switchControlMarkup('autoBackfill', '自动整理旧楼层')}
             </label>
             <label>自动压缩阈值（token）
-              <input type="number" min="1000" max="30000" step="500" data-setting="rollupTokenLimit">
+              <input type="number" min="1000" max="200000" step="1000" data-setting="rollupTokenLimit">
               <small>达到阈值后整理长期剧情。</small>
             </label>
           </article>
 
-</div></details><details class="ssa-settings-group"><summary>剧情选项 · 写法与数量</summary><div class="ssa-group-body">
+</div></details><details class="ssa-settings-group"><summary><span>剧情选项</span><small>主模型在回复末尾顺带写，不额外调用</small></summary><div class="ssa-group-body">
           <article class="ssa-paper-card">
             <p class="ssa-kicker">正文下方显示</p>
             <h2>选择选项的表达方式和数量</h2>
-            <p class="ssa-muted">角色回复后自动生成，显示在正文下方；点击只填入输入框，不会自动发送给 AI。</p>
+            <p class="ssa-muted">开启后，每轮在提示词末尾加一段要求，让主模型写完正文后顺带写几个选项。选项留在回复末尾，由美化正则排成卡片，点一下只填入输入框，不会自动发送给 AI。发给模型时会去掉，也不会被整理进记忆。</p>
             <label class="ssa-switch-row">
               <span class="ssa-switch-copy"><strong>剧情选项功能</strong><small>由玩家决定是否开启；默认关闭。</small></span>
               ${switchControlMarkup('optionsEnabled', '剧情选项功能')}
             </label>
+            <div class="ssa-slot-editor">
+              <div class="ssa-slot-editor-head">
+                <span>选项类别</span>
+                <small data-role="option-slot-total"></small>
+              </div>
+              <p class="ssa-muted">每一类在回复里写成 &lt;co&gt;【类别名】……&lt;/co&gt;，名字、数量和要求都可以改，最多一共 12 个。按从上到下的顺序输出。</p>
+              <div data-role="option-slots"></div>
+              <div class="ssa-slot-actions">
+                <button class="ssa-secondary-button" type="button" data-action="add-option-slot">添加一类</button>
+                <span class="ssa-format-presets">从预设开始：
+                  ${[4, 6, 8, 12].map((count) => `<button type="button" class="ssa-text-button" data-action="option-preset" data-count="${count}">${count} 个</button>`).join('')}
+                </span>
+              </div>
+            </div>
+            <label class="ssa-switch-row">
+              <span class="ssa-switch-copy"><strong>用正则美化显示</strong><small>开启后自动在酒馆的正则列表里加三条“春序 · 剧情选项”脚本：选项留在回复里排成卡片，点一下填入输入框；发给模型时自动去掉。可以在酒馆正则面板里改样式，插件不会覆盖你的修改。</small></span>
+              ${switchControlMarkup('optionRegexEnabled', '用正则美化显示')}
+            </label>
+            <button class="ssa-secondary-button" type="button" data-action="reset-option-regex">恢复默认美化正则</button>
+            <label>所有选项都要遵守的要求
+              <textarea rows="3" data-setting="optionWritingNotes" placeholder="每行一条。留空就不加通用要求。"></textarea>
+              <small>格式那几条（只写在选项块里、块后空一行）由插件固定加上，不用写。</small>
+            </label>
+          </article>
+</div></details><details class="ssa-settings-group" data-group="cliche"><summary><span>八股删除器</span><small>回复里的套话自动删改，可以撤销</small></summary><div class="ssa-group-body">
+          <article class="ssa-paper-card">
+            <label class="ssa-switch-row">
+              <span class="ssa-switch-copy"><strong>清理回复里的八股</strong><small>“命运的齿轮”“比哭还难看”“说实话，”这类套话。纯填充词在本地直接删；需要改写的句子交给整理 API，在每楼那一次整理里顺带完成，不额外调用。</small></span>
+              ${switchControlMarkup('clicheEnabled', '清理回复里的八股')}
+            </label>
             <fieldset class="ssa-mode-fieldset">
-              <legend>表达方式</legend>
+              <legend>处理方式</legend>
               <div class="ssa-mode-options">
-                <label><input type="radio" name="ssa-option-mode" value="guided" data-setting="optionMode"><span>玩家行动（代入）</span></label>
-                <label><input type="radio" name="ssa-option-mode" value="scene" data-setting="optionMode"><span>场景入口</span></label>
-                <label><input type="radio" name="ssa-option-mode" value="third" data-setting="optionMode"><span>第三人称叙事</span></label>
-                <label><input type="radio" name="ssa-option-mode" value="mixed" data-setting="optionMode"><span>混合</span></label>
+                <label><input type="radio" name="ssa-cliche-mode" value="auto" data-setting="clicheMode"><span>直接清理（可撤销）</span></label>
+                <label><input type="radio" name="ssa-cliche-mode" value="mark" data-setting="clicheMode"><span>只标出来</span></label>
               </div>
             </fieldset>
-            <div class="ssa-inline-fields is-two-columns">
-              <label>选项数量
-                <select data-setting="optionCount">
-                  ${Array.from({ length: 9 }, (_, index) => `<option value="${index + 4}">${index + 4} 个</option>`).join('')}
-                </select>
-              </label>
-              <label>使用接口
-                <select data-setting="optionSource">
-                  <option value="current">酒馆当前 API</option>
-                  <option value="extra">额外 API</option>
-                </select>
-              </label>
-            </div>
-            <label>写作要求<textarea rows="3" data-setting="optionWritingNotes" placeholder="例如：保留选择权，选项之间有明显区别。"></textarea></label>
+            <p class="ssa-muted">清理后，下一轮发送的历史和整理进记忆的都是清理后的版本，模型不会照着旧套话继续写。每条回复下面会显示删改了几处，点“撤销”恢复原文，这一楼以后不再清理。</p>
+            <label>自己加的规则
+              <textarea rows="4" data-setting="clicheCustomRules" placeholder="每行一条。&#10;删:总而言之    本地直接删&#10;改:眸光        交给整理 API 改写&#10;标:叹了口气    只标出来&#10;/眸[光色]/      斜杠包起来是正则"></textarea>
+              <small>内置 ${DEFAULT_CLICHE_RULES.length} 条规则来自“八股”清单，常用词（如“似乎”“一丝”）只有在一条回复里反复出现时才算。</small>
+            </label>
           </article>
-</div></details><details class="ssa-settings-group"><summary>自主推进与玩家偏好</summary><div class="ssa-group-body">
-          <article class="ssa-advance-hero">
-            <div class="ssa-hero-mark" aria-hidden="true">春</div>
-            <div>
-              <p class="ssa-kicker">玩家偏好只建立一次</p>
-              <h2>让导演先理解你想怎样体验故事</h2>
-              <p>测试会在独立页面完成。以后这里只保留结果摘要，不再铺开整套题目。</p>
-            </div>
-          </article>
-
-          <section class="ssa-preference-entry" data-role="preference-entry">
-            <div>
-              <strong>还没有玩家偏好档案</strong>
-              <p>可完成 10 题测试和剧情体验多选，也可以直接依据当前聊天进行保守分析。</p>
-            </div>
-            <div class="ssa-entry-actions">
-              <button class="ssa-primary-button" type="button" data-action="open-preference-test">开始首次测试</button>
-              <button class="ssa-secondary-button" type="button" data-action="skip-preference-quiz">跳过测试</button>
-            </div>
-          </section>
-          <div class="ssa-result-card ssa-profile-card" data-role="preference-profile" hidden></div>
+        </div></details><details class="ssa-settings-group"><summary><span>自主推进</span><small>每轮提醒主模型让世界往前走一小步</small></summary><div class="ssa-group-body">
 
           <article class="ssa-paper-card ssa-advance-card">
             <p class="ssa-kicker">自主推进剧情</p>
             <h2>后台推进</h2>
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>由玩家主动开启</strong><small>在角色回复后后台生成下一步指令；默认关闭。</small></span>
+              <span class="ssa-switch-copy"><strong>开启自主推进</strong><small>每轮整理时顺便安排下一轮推什么，跟正常回复一起发出，不额外调用接口。首页可以看、改、换一个或这轮不推。默认关闭。</small></span>
               ${switchControlMarkup('autoAdvanceEnabled', '自主推进剧情')}
             </label>
-            <div class="ssa-inline-fields is-two-columns">
-              <label>导演接口
-                <select data-setting="advanceSource">
-                  <option value="extra">额外 API</option>
-                  <option value="current">酒馆当前 API</option>
-                </select>
-              </label>
-              <label>最多追加
-                <select data-setting="advanceRounds">
-                  <option value="1">1 轮</option>
-                  <option value="2">2 轮</option>
-                  <option value="3">3 轮</option>
-                </select>
-              </label>
-            </div>
-            <p class="ssa-notice">自主推进会先校对时间、地点、人物状态和玩家边界。有未发送草稿时立即停止。</p>
+            <label>推进力度
+              <select data-setting="advanceStrength">
+                <option value="light">轻：回应之后加一两句变化</option>
+                <option value="normal">中：不超过一个场景（默认）</option>
+                <option value="strong">强：让一件事真正发生</option>
+              </select>
+            </label>
+            <fieldset class="ssa-advance-modules">
+              <legend>推进方式（可多选）</legend>
+              ${ADVANCE_MODULES.map((module) => `
+              <label class="ssa-advance-module">
+                <input type="checkbox" data-advance-module="${module.id}">
+                <span><strong>${module.label}</strong><small>${module.description}</small></span>
+              </label>`).join('')}
+            </fieldset>
+            <label>自定义事件池
+              <textarea rows="3" data-setting="advanceEventPool" placeholder="每行一件可能发生的事，勾选“自定义事件池”后生效。&#10;例：门外有人敲门&#10;旧宅突然停电"></textarea>
+            </label>
+            <p class="ssa-notice">每轮只挑一两种方式，最近用过的会先轮空；整理接口没跟上时由插件按局面挑。要不要替玩家说话，按你预设里的设置来。做过偏好测试的话，会一并参考你的题材口味。</p>
           </article>
-          <div class="ssa-result-card" data-role="advance-state">尚未执行自主推进。</div>
-        </div></details><details class="ssa-settings-group"><summary>NPC 生成规则</summary><div class="ssa-group-body">
+          
+        </div></details><details class="ssa-settings-group"><summary><span>NPC</span><small>按剧情需要自动建立配角档案</small></summary><div class="ssa-group-body">
           <article class="ssa-paper-card ssa-npc-archive-intro">
             <p class="ssa-kicker">当前聊天</p>
             <h2>NPC 人物档案</h2>
@@ -287,21 +414,26 @@ export function createArchiveShell() {
               <span class="ssa-switch-copy"><strong>按剧情需要自动建档与更新</strong><small>AI 自行判断当前缺少的剧情功能；剧情明确推进年龄、工作或人生阶段时更新，默认关闭。</small></span>
               ${switchControlMarkup('autoNpcEnabled', 'NPC 自动建档与更新')}
             </label>
-            <label>生成接口
-              <select data-setting="npcSource">
-                <option value="current">酒馆当前 API</option>
-                <option value="extra">额外 API</option>
-              </select>
-            </label>
             <label>补充要求（可选）
               <textarea rows="3" data-setting="npcBrief" placeholder="可补充必须遵守的世界观事实或需要避开的设定；人物的剧情功能由 AI 判断。"></textarea>
             </label>
             <button class="ssa-primary-button ssa-wide-button" type="button" data-action="generate-npc">立即生成 NPC 并存入档案</button>
           </article>
-</div></details><details class="ssa-settings-group"><summary>接口配置 · 多套 API</summary><div class="ssa-group-body">          <article class="ssa-paper-card">
-            <p class="ssa-kicker">可选的额外接口</p>
-            <h2>额外 OpenAI-compatible API</h2>
-            <label>已保存的 API 配置
+</div></details><details class="ssa-settings-group" data-group="api"><summary><span>API 接口</span><small>整理用一个，向量用一个</small></summary><div class="ssa-group-body">          <article class="ssa-paper-card ssa-slot-card">
+            <div class="ssa-slot-grid">
+              <label>整理用
+                <select data-setting="organizeProfileId"><option value="">酒馆当前 API</option></select>
+                <small>每楼一次：摘要、人物物品、你的话、NPC</small>
+              </label>
+              <label>向量用
+                <select data-setting="vectorProfileId"></select>
+                <small>只用来生成嵌入、查找往事</small>
+              </label>
+            </div>
+          </article>
+          <article class="ssa-paper-card">
+            <h3 class="ssa-subheading">编辑配置</h3>
+            <label>选择要编辑的配置
               <select data-api-profile="select"><option value="">默认配置</option></select>
             </label>
             <div class="ssa-api-profile-actions">
@@ -317,7 +449,7 @@ export function createArchiveShell() {
             </div>
             <label>配置名称
               <input type="text" autocomplete="off" placeholder="例如 主用接口、备用接口" data-api-profile="name">
-              <small>修改后自动保存。选择一套配置，供所有使用“额外 API”的功能调用。</small>
+              <small>修改后自动保存。在上面把它选为“整理用”或“向量用”才会被使用。</small>
             </label>
             <label>Chat Completions 完整地址
               <input type="url" autocomplete="off" placeholder="https://example.com/v1/chat/completions" data-setting="extraEndpoint">
@@ -334,10 +466,16 @@ export function createArchiveShell() {
               <input type="password" autocomplete="new-password" placeholder="随当前配置保存在此浏览器" data-secret="extraApiKey">
               <small>配置和密钥保存在当前浏览器，重开后保留；不随档案导出，也不会同步到其他设备。同页扩展仍可能读取密钥。</small>
             </label>
-            <button class="ssa-secondary-button" type="button" data-action="test-extra-api">测试额外 API</button>
+
+            <label>嵌入模型（向量用）
+              <input type="text" list="ssa-embedding-model-list" autocomplete="off" placeholder="例如 text-embedding-3-small，也可手动输入" data-setting="recallEmbeddingModel">
+              <datalist id="ssa-embedding-model-list" data-role="embedding-model-list"></datalist>
+              <small>只有被选为“向量用”的配置需要填。名字含 embed 的模型会自动选中。</small>
+            </label>
+            <button class="ssa-secondary-button" type="button" data-action="test-extra-api">测试这套配置</button>
           </article>
 
-        </div></details><details class="ssa-settings-group"><summary>高级设置 · 发送与召回</summary><div class="ssa-group-body">      <div class="ssa-privacy-ribbon">
+        </div></details><details class="ssa-settings-group" data-group="advanced"><summary><span>高级</span><small>发送范围、压缩阈值和向量回忆</small></summary><div class="ssa-group-body">      <div class="ssa-privacy-ribbon">
         <span class="ssa-leaf-dot" aria-hidden="true"></span>
         <strong>远端原文边界</strong>
         <span data-role="remote-floor-boundary">默认不发送历史楼层原文</span>
@@ -364,7 +502,7 @@ export function createArchiveShell() {
             </div>
             <div class="ssa-summary-control-grid">
               <label>自动压缩阈值（token）
-                <input type="number" min="1000" max="30000" step="500" data-setting="rollupTokenLimit">
+                <input type="number" min="1000" max="200000" step="1000" data-setting="rollupTokenLimit">
                 <small>总摘要达到此值或每满 100 楼时自动压缩。</small>
               </label>
               <label>默认展开最近楼层
@@ -387,19 +525,19 @@ export function createArchiveShell() {
             </div>
           </article>
 
-          <article class="ssa-paper-card ssa-recall-card">
-            <p class="ssa-kicker">摘要语义检索</p>
-            <h2>语义回忆</h2>
-            <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>自动找回相关往事</strong><small>只向量化楼层摘要；默认关闭。生成前召回相关旧摘要并注入真实提示词。</small></span>
-              ${switchControlMarkup('semanticRecallEnabled', '自动找回相关往事')}
+          <article class="ssa-paper-card ssa-recall-card" data-role="recall-card">
+            <p class="ssa-kicker">找回相关往事</p>
+            <h2>回忆</h2>
+            <label>回忆方式
+              <select data-setting="recallMode">
+                <option value="auto">自动（默认）：配了嵌入接口就用向量，没配就用关键词</option>
+                <option value="keyword">只用关键词（不需要接口）</option>
+                <option value="vector">只用向量（失败时临时改用关键词）</option>
+                <option value="off">关闭</option>
+              </select>
+              <small>回复前从旧楼层的小结里找出和眼下有关的几段一起发送。关键词方式用档案里已有的人名、物品、地点去匹配；向量方式按意思找，更准，但要配好“向量用”的接口。已经在这次请求里的楼层不会重复带入。</small>
             </label>
             <p class="ssa-notice">不会把某次拒绝、同意或边界永久化。同一主题后来有新表态时，以更晚楼层为当前状态，旧表态只保留为历史。</p>
-            <label>嵌入模型（优先自动读取）
-              <input type="text" list="ssa-embedding-model-list" autocomplete="off" placeholder="例如 text-embedding-3-small，也可手动输入" data-setting="recallEmbeddingModel">
-              <datalist id="ssa-embedding-model-list" data-role="embedding-model-list"></datalist>
-              <small>使用下方选中的 API 配置和密钥；嵌入模型随配置保存，含 embed 的型号会优先自动选中。</small>
-            </label>
             <div class="ssa-inline-fields is-three-columns">
               <label>召回数量
                 <select data-setting="recallTopK">
@@ -444,6 +582,8 @@ export function createArchiveShell() {
   `;
   document.body.append(root);
   bindLauncherSwipe(root);
+  watchHeroScroll(root);
+  renderHero(root, {});
   return root;
 }
 
@@ -634,6 +774,14 @@ function makeFactGroup(title, items) {
   return section;
 }
 
+// Used by the player profile and NPC cards; strings and empty values are tolerated
+// because older saved profiles store some of these fields as plain text.
+function appendResultList(parent, title, items) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : items ? [String(items)] : [];
+  const group = makeFactGroup(title, list);
+  if (group) parent.append(group);
+}
+
 function makeFloorCard(record, expanded) {
   const article = document.createElement('details');
   article.className = `ssa-floor-card is-${record.status}${record.isUser ? ' is-player' : ''}`;
@@ -804,24 +952,6 @@ export function renderPlayerProfile(root, profile) {
   container.append(actions);
 }
 
-export function renderAdvanceState(root, state) {
-  const container = root.querySelector('[data-role="advance-state"]');
-  container.replaceChildren();
-  if (!state?.directive) {
-    container.textContent = '尚未执行自主推进。';
-    return;
-  }
-  const title = document.createElement('h3');
-  title.textContent = '最近一次后台推进';
-  const check = document.createElement('p');
-  check.innerHTML = '<strong>连续性校对</strong>';
-  check.append(document.createTextNode(state.continuityCheck || '已按当前档案校对。'));
-  const directive = document.createElement('p');
-  directive.innerHTML = '<strong>推进指令</strong>';
-  directive.append(document.createTextNode(state.directive));
-  container.append(title, check, directive);
-}
-
 export function renderNpcs(root, npcs) {
   const list = root.querySelector('[data-role="npc-list"]');
   list.replaceChildren();
@@ -876,6 +1006,8 @@ export function renderNpcs(root, npcs) {
     if (npc.personality) appendResultList(card, '由经历形成的性格', [npc.personality]);
     appendResultList(card, '人物内部矛盾', npc.contradictions ?? npc.contrasts);
     appendResultList(card, '经历与性格的因果', npc.personalityFormation);
+    if (npc.surprise) appendResultList(card, '意外之处', [npc.surprise]);
+    appendResultList(card, '对人对事的看法', npc.opinions);
     appendResultList(card, '愿望、利益与底线', npc.independentWill);
     appendResultList(card, '人物关系', npc.relationships);
     appendResultList(card, '随剧情推进的成长状态', npc.growthState);
@@ -965,6 +1097,8 @@ export function resetPreferenceTest(root) {
   }
   const main = root.querySelector('.ssa-main');
   if (main) main.scrollTop = 0;
+  root.classList.remove('is-hero-compact');
+  renderHero(root, { tab });
 }
 
 export function setRetestConfirmOpen(root, open) {
@@ -1020,7 +1154,21 @@ export function renderRecallState(root, { indexedCount = 0, recalledFloors = [],
   status.dataset.tone = 'normal';
 }
 
+export const UI_THEMES = [
+  { id: 'chunlai', name: '春来', note: '跟随春来美化主题', colors: ['#3b584b', '#52796c', '#819b85', '#c3c0aa', '#efeada'] },
+  { id: 'dew', name: '晨雾', note: '雾蓝与松绿', colors: ['#22393c', '#46707e', '#6b8b81', '#afbb98', '#cecdb9'] },
+  { id: 'sprout', name: '新芽', note: '浅嫩的春绿', colors: ['#55703d', '#9db476', '#bbcca0', '#d0ddbb', '#f2f8ec'] },
+  { id: 'celadon', name: '宋瓷青绿', note: '青瓷与素绢', colors: ['#2e6a67', '#5e8c87', '#a9c8be', '#d7e6db', '#f1f0e8'] },
+  { id: 'willow', name: '柳岸', note: '莫奈的水边柳色', colors: ['#314c35', '#356b43', '#74b16c', '#bddd43', '#f9f7ee'] },
+  { id: 'bamboo', name: '竹林', note: '竹影与暖米色', colors: ['#2d4c34', '#4a6a3d', '#79933d', '#bac882', '#e2ded3'] },
+  { id: 'cliff', name: '海崖', note: '草绿加一点海蓝', colors: ['#2a472f', '#839d45', '#92ab76', '#77aad7', '#e8e9c0'] },
+];
+
 export function syncSettings(root, settings, apiKey = '') {
+  applyHeroArt(root, settings);
+  const heroUrl = root.querySelector('[data-role="hero-url"]');
+  if (heroUrl) heroUrl.hidden = settings.heroArt !== 'custom';
+  root.dataset.ssaTheme = UI_THEMES.some((theme) => theme.id === settings.uiTheme) ? settings.uiTheme : 'chunlai';
   for (const input of root.querySelectorAll('[data-setting]')) {
     const key = input.dataset.setting;
     const value = settings[key];
@@ -1045,6 +1193,13 @@ export function syncSettings(root, settings, apiKey = '') {
   for (const input of root.querySelectorAll('[data-quiz-id]')) {
     input.checked = Number(settings.preferenceQuizAnswers?.[input.dataset.quizId]) === Number(input.value);
   }
+  const genres = new Set(settings.preferenceGenres ?? []);
+  for (const input of root.querySelectorAll('[data-genre-id]')) input.checked = genres.has(input.dataset.genreId);
+  for (const input of root.querySelectorAll('[data-taste-id]')) input.checked = settings.preferenceTastes?.[input.dataset.tasteId] === input.value;
+  const tasteSummary = root.querySelector('[data-role="taste-summary"]');
+  if (tasteSummary) tasteSummary.textContent = settings.tasteLine || '还没选题材和口味。点“开始首次测试”可以补上，不做也不影响使用。';
+  const modules = new Set(settings.advanceModules ?? []);
+  for (const input of root.querySelectorAll('[data-advance-module]')) input.checked = modules.has(input.dataset.advanceModule);
   const selectedExperiences = new Set(settings.storyExperiencePreferences ?? []);
   for (const input of root.querySelectorAll('[data-experience-id]')) {
     input.checked = selectedExperiences.has(input.dataset.experienceId);
@@ -1075,7 +1230,7 @@ export function setStatus(root, message, tone = 'normal') {
 
 export function switchTab(root, tab) {
   const legacy = tab;
-  tab = ({summary:'database', options:'settings', advance:'settings', npc:'database'})[tab] ?? tab;
+  tab = ({summary:'database', options:'settings', advance:'settings', npc:'people'})[tab] ?? tab;
   const subpage = tab === 'preference-test';
   root.classList.toggle('is-subpage', subpage);
   for (const button of root.querySelectorAll('[data-tab]')) button.classList.toggle('is-active', button.dataset.tab === tab);
@@ -1086,4 +1241,6 @@ export function switchTab(root, tab) {
   }
   const main = root.querySelector('.ssa-main');
   if (main) main.scrollTop = 0;
+  root.classList.remove('is-hero-compact');
+  renderHero(root, { tab });
 }
