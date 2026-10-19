@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>春序档案 · 视觉预览</title>
-  <link rel="stylesheet" href="style.css?v=0.7.2">
+  <title>喵喵数据库 · 视觉预览</title>
+  <link rel="stylesheet" href="style.css?v=0.7.3">
   <style>
     html, body { min-height: 100%; margin: 0; background: linear-gradient(145deg, #253a32, #557265); }
     .preview-note { position: fixed; left: 18px; bottom: 18px; z-index: 1; color: rgba(255,255,255,.65); font: 12px/1.5 system-ui; }
   </style>
 </head>
 <body>
-  <p class="preview-note">春序档案 · 静态视觉预览</p>
+  <p class="preview-note">喵喵数据库 · 静态视觉预览</p>
   <script type="module">
-    import { createArchiveShell, focusLatestFloor, renderModelOptions, renderNpcs, renderPlayerProfile, renderRecallState, renderSnapshot, resetPreferenceTest, setOpen, setRetestConfirmOpen, switchTab, syncSettings } from './ui/view.js?v=0.7.2';
+    import { createArchiveShell, focusLatestFloor, renderModelOptions, renderNpcs, renderPlayerProfile, renderRecallState, renderSnapshot, resetPreferenceTest, setOpen, setRetestConfirmOpen, switchTab, syncSettings } from './ui/view.js?v=0.7.3';
     const root = createArchiveShell();
     root.querySelector('[data-api-profile="select"]').innerHTML = '<option>主用接口</option><option>备用接口</option>';
     root.querySelector('[data-api-profile="name"]').value = '主用接口';
@@ -178,7 +178,7 @@
       settings: { optionsEnabled: true, extraEndpoint: previewRecall ? 'https://example.com/v1/chat/completions' : '', recallEmbeddingModel: previewRecall ? 'text-embedding-3-small' : '', semanticRecallEnabled: previewRecall === 'on' },
       recall: previewRecall === 'on' ? { phase: 'injected', indexedCount: 6, recalledFloors: [1, 3] } : null,
     });
-    const { renderHero } = await import('./ui/hero.js?v=0.7.2');
+    const { renderHero } = await import('./ui/hero.js?v=0.7.3');
     renderHero(root, { floor: 8, scene: '雨夜，旧宅档案室', chat: '林素' });
     const { renderPushCard } = await import('./ui/push-card.js');
     renderPushCard(root, {
@@ -197,7 +197,7 @@
     const demoChat = lines.map((mes, i) => ({ mes, is_user: i % 2 === 0, name: i % 2 ? '林素' : '玩家' }));
     const finalPrompt = [
       { role: 'system', content: '你是林素，旧宅档案室的保管人。以下是角色设定……（预设与角色卡内容）' },
-      { role: 'system', content: '【春序档案 · 剧情总摘要】\n以下是本聊天已经发生的剧情……\n\n【玩家本人说过的话】\n【玩家】主题：节奏；类别：喜欢；内容：慢热，别急着推感情线\n\n【当前剧情状态】\n【时间地点】时间：雨夜；地点：旧宅档案室\n【人物档案】姓名：林素；当前状态：核对登记簿\n\n【角色回复】第 2 楼：林素示意玩家把伞放在门边。' },
+      { role: 'system', content: '【喵喵数据库 · 剧情总摘要】\n以下是本聊天已经发生的剧情……\n\n【玩家本人说过的话】\n【玩家】主题：节奏；类别：喜欢；内容：慢热，别急着推感情线\n\n【当前剧情状态】\n【时间地点】时间：雨夜；地点：旧宅档案室\n【人物档案】姓名：林素；当前状态：核对登记簿\n\n【角色回复】第 2 楼：林素示意玩家把伞放在门边。' },
       ...demoChat.slice(2).map((m) => ({ role: m.is_user ? 'user' : 'assistant', content: m.mes })),
       { role: 'system', content: '【剧情选项】\n每次写完正文后，必须在回复末尾输出一组剧情选项……' },
     ];
@@ -216,7 +216,7 @@
     syncSettings(root, { uiTheme: new URLSearchParams(location.search).get("theme") || "chunlai", heroArt: new URLSearchParams(location.search).get("art") || "night",
       autoSummarize: true,
       summarySource: 'current',
-      rollupTokenLimit: 6000,
+      rollupTokenLimit: 20000, storyScope: "auto",
       remoteRawFloorLimit: 0,
       expandedFloorCount: 5,
       backfillBatchSize: 10,

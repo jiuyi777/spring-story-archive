@@ -40,6 +40,42 @@ test('OpenAI-compatible client sends the supplied messages without adding chat d
   assert.equal(captured.url, 'https://example.test/v1/chat/completions');
   assert.deepEqual(captured.body.messages, [{ role: 'user', content: 'SAFE_PAYLOAD_ONLY' }]);
   assert.equal(captured.init.headers.Authorization, 'Bearer secret-for-test');
+  assert.equal(Object.hasOwn(captured.body, 'thinking'), false);
+});
+
+test('official DeepSeek tasks disable thinking so the short output budget reaches the JSON result', async () => {
+  for (const path of ['', '/v1', '/beta']) {
+    let body;
+    const result = await callOpenAiCompatible({
+      endpoint: `https://api.deepseek.com${path}/chat/completions`,
+      model: 'deepseek-flash',
+      messages: [{ role: 'user', content: '整理虚构剧情' }],
+      maxTokens: 1400,
+      fetchImpl: async (_url, init) => {
+        body = JSON.parse(init.body);
+        return { ok: true, json: async () => body.thinking?.type === 'disabled'
+          ? { choices: [{ finish_reason: 'stop', message: { content: '{"floors":[]}' } }] }
+          : { choices: [{ finish_reason: 'length', message: { content: '' } }] } };
+      },
+    });
+    assert.equal(result, '{"floors":[]}');
+    assert.equal(body.max_tokens, 1400);
+    assert.deepEqual(body.thinking, { type: 'disabled' });
+  }
+});
+
+test('DeepSeek models on other providers keep the compatible request shape', async () => {
+  let body;
+  await callOpenAiCompatible({
+    endpoint: 'https://gateway.example.test/v1/chat/completions',
+    model: 'deepseek-flash',
+    messages: [{ role: 'user', content: '整理虚构剧情' }],
+    fetchImpl: async (_url, init) => {
+      body = JSON.parse(init.body);
+      return { ok: true, json: async () => ({ choices: [{ message: { content: 'OK' } }] }) };
+    },
+  });
+  assert.equal(Object.hasOwn(body, 'thinking'), false);
 });
 
 test('model discovery derives the models endpoint and returns unique model ids', async () => {
@@ -128,7 +164,7 @@ test('summary prompts preserve player statements without making old statements p
   assert.match(prompts[0], /以更晚楼层的明确更新为当前状态/);
   assert.match(prompts[1], /不得把任何单次表态永久化/);
   assert.doesNotMatch(prompts.join('\n'), /最高优先级/);
-  assert.match(prompts[1], /时间线顺序以楼层编号为准/);
+  assert.match(prompts[1], /按输入档案的排列顺序/);
 });
 
 test('batch summary response keeps valid requested floors and ignores duplicates or strangers', async () => {

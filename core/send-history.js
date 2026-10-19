@@ -1,7 +1,9 @@
-import { fingerprintMessage } from './privacy-payload.js?v=0.7.2';
+import { fingerprintMessage } from './privacy-payload.js?v=0.7.3';
 
 export function createSendHistory({ storage, chatKey, chat, promptChat, type, onChange = () => {} }) {
-  const rows = chat.map((message, floorIndex) => ({ message, floorIndex })).filter(({ message }) => !message.is_system || message.extra?.tool_invocations);
+  const includesTools = promptChat.some((message) => message.is_system && Array.isArray(message.extra?.tool_invocations));
+  const rows = chat.map((message, floorIndex) => ({ message, floorIndex }))
+    .filter(({ message }) => !message.is_system || (includesTools && Array.isArray(message.extra?.tool_invocations)));
   const record = {
     key: `${chatKey}::send:${crypto.randomUUID()}`, chatKey, type: type || 'normal',
     targetFloor: type === 'swipe' || type === 'continue' ? chat.length : chat.length + 1,

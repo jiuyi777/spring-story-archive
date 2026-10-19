@@ -6,7 +6,56 @@ import {
   isFloorExpandedByDefault,
   isLauncherDockGesture,
   isRightSwipeGesture,
+  renderSnapshot,
 } from '../ui/view.js';
+
+test('rendered backfill count accepts complete v1/v2 records and counts unusable records', (t) => {
+  const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  function element() {
+    return {
+      children: [], dataset: {}, className: '', textContent: '',
+      append(...children) { this.children.push(...children); },
+      replaceChildren(...children) { this.children = children; },
+      setAttribute() {},
+      querySelectorAll(selector) {
+        return this.children.filter((child) => child.className.split(' ').includes('ssa-floor-card')
+          && (!selector.endsWith('[open]') || child.open));
+      },
+    };
+  }
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: element } });
+  t.after(() => {
+    if (previousDocument) Object.defineProperty(globalThis, 'document', previousDocument);
+    else delete globalThis.document;
+  });
+  const nodes = Object.fromEntries(['floor-list', 'rollup-text', 'rollup-floor', 'rollup-token', 'backfill-status']
+    .map((role) => [`[data-role="${role}"]`, element()]));
+  const root = { querySelector: (selector) => nodes[selector] };
+  const completeRecord = (floorIndex, memoryVersion = 2) => ({
+    floorIndex, memoryVersion, status: 'ready', inputComplete: true, summary: `楼层 ${floorIndex + 1} 的摘要`,
+  });
+  const render = (summaries) => renderSnapshot(root, {
+    summaries, rollup: { readyFloors: summaries.filter((record) => record.status === 'ready').length },
+  });
+  const count = () => nodes['[data-role="backfill-status"]'].textContent;
+
+  render(Array.from({ length: 5 }, (_, index) => completeRecord(index)));
+  assert.equal(count(), '待补全 0 楼');
+  assert.equal(nodes['[data-role="rollup-floor"]'].textContent, '已摘要 5 / 5 楼');
+  assert.equal(nodes['[data-role="floor-list"]'].children.length, 5);
+
+  render([completeRecord(0, 1), completeRecord(1, 2)]);
+  assert.equal(count(), '待补全 0 楼');
+
+  render([
+    completeRecord(0, 1), completeRecord(1, 2),
+    completeRecord(2, 0), { ...completeRecord(3), memoryVersion: undefined },
+    { ...completeRecord(4), inputComplete: false },
+    { floorIndex: 5, status: 'failed' }, { floorIndex: 6, status: 'missing' },
+    { floorIndex: 7, status: 'processing' }, { floorIndex: 8, status: 'skipped' },
+  ]);
+  assert.equal(count(), '待补全 5 楼');
+});
 
 test('the latest five floors expand by default and older floors stay folded', () => {
   assert.deepEqual(
@@ -159,7 +208,7 @@ test('the smaller launcher ball can dock with a right swipe and restore from its
   assert.equal(isRightSwipeGesture({ x: 20, y: 100 }, { x: 105, y: 108 }), true);
   assert.equal(isRightSwipeGesture({ x: 20, y: 100 }, { x: 42, y: 102 }), true);
   assert.equal(isRightSwipeGesture({ x: 20, y: 100 }, { x: 40, y: 210 }), false);
-  assert.match(view, /class="ssa-launcher-label">春序/);
+  assert.match(view, /class="ssa-launcher-label">喵喵/);
   assert.doesNotMatch(view, /data-action="restore-panel"/);
   assert.match(view, /addEventListener\('pointerdown'/);
   assert.match(view, /addEventListener\('pointermove'/);

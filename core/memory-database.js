@@ -1,4 +1,4 @@
-import { estimateTokens, validSummaries } from './privacy-payload.js?v=0.7.2';
+import { estimateTokens, validSummaries, resolveUserName } from './privacy-payload.js?v=0.7.3';
 
 export const MEMORY_VERSION = 2;
 // v1 records stay valid: they are migrated when the database is rebuilt, so an
@@ -22,15 +22,38 @@ export const MEMORY_TABLES = {
 // Hints guide the summary model and the editor; they never enter injected text.
 export const MEMORY_FIELD_HINTS = {
   player: { topic: '例如：恋爱节奏、对林素的态度、战斗描写', kind: '喜欢／讨厌／雷点／要求／决定', content: '按你的原意写', previous: '改口时自动记下旧说法' },
-  inventory: { owner: '真正归谁所有；借出、保管不改变', holder: '此刻在谁手上', place: '没人拿着时放在哪里' },
+  scene: { time: '当前实际时刻；到点或时间推进时更新，沿用明确日期；约定时间写 tasks.deadline', location: '当前实际所在地点；抵达或换场时更新；计划地点与远处背景不改变当前场景', situation: '现场局势与环境；人物用品、数量及约定详情由对应表记录' },
+  characters: { state: '个人身体、情绪及正在做的事；物品持有与约定详情由对应表记录', location: '此人实际所在地点；实际移动才更新，未移动者保持原位置' },
+  inventory: { owner: '真正归谁所有；借出、保管不改变', holder: '此刻在谁手上', quantity: '当前剩余数量', place: '物品此刻的存放位置', state: '物品本身的状况与用途；归属、持有者、数量、位置分别填写专用字段' },
   skills: { available: '可用／暂不可用及原因' },
-  tasks: { state: '进行中／已完成／已取消', deadline: '剧情内的时限' },
+  tasks: { state: '进行中／已完成／已取消', deadline: '约定或任务期限，不代表当前已到该时刻' },
   clues: { basis: '已证实／某人说法／猜测／计划', knownBy: '哪些人知道', state: '未解决／已解决' },
   relationships: { cause: '因为哪件事发生变化' },
 };
 
 const splitNames = (value) => (value || '').split(/[、,，;；\n]/).map((name) => name.trim()).filter(Boolean);
 const CLOSED_STATE = /已完成|已取消|已结束|已解决|已失效/;
+const OBSERVATION_FIELDS = {
+  'characters.state': '状态',
+  'scene.situation': '情境',
+  'inventory.state': '状况',
+};
+
+function fieldLabel(table, field, row, fallback, tables) {
+  const label = OBSERVATION_FIELDS[`${table}.${field}`];
+  if (!label) return fallback;
+  const source = row.fieldSources?.[field] ?? row.floorIndex;
+  const newer = (entry, fields) => fields.some((key) => Object.hasOwn(entry.values, key) && (entry.fieldSources?.[key] ?? entry.floorIndex) > source);
+  // Keep provenance local. When a later concrete fact supersedes a related
+  // observation, express the observation as history instead of a current fact.
+  const older = table === 'inventory'
+    ? newer(row, ['owner', 'holder', 'quantity', 'place'])
+    : newer(row, table === 'scene' ? ['time', 'location'] : ['location'])
+      || ['inventory', 'tasks'].some((key) => (tables[key] ?? []).some((entry) => entry.values.name
+      && row.values[field].includes(entry.values.name)
+      && newer(entry, key === 'inventory' ? ['owner', 'holder', 'quantity', 'place'] : ['state', 'next', 'deadline'])));
+  return older ? `此前${label}` : label;
+}
 
 // v1 had a single inventory "owner" field labelled 持有者 (current holder).
 // v2 separates ownership from possession, so the old value becomes holder.
@@ -82,7 +105,12 @@ export function buildMemoryDatabase(records, chat, edits = [], { throughFloor = 
     if (!rows) continue;
     if (change.operation === 'delete') { rows.delete(change.id); continue; }
     const old = rows.get(change.id);
-    rows.set(change.id, { id: change.id, values: { ...(old?.values ?? {}), ...change.values }, floorIndex });
+    rows.set(change.id, {
+      id: change.id,
+      values: { ...(old?.values ?? {}), ...change.values },
+      fieldSources: { ...(old?.fieldSources ?? {}), ...Object.fromEntries(Object.keys(change.values ?? {}).map(field => [field, floorIndex])) },
+      floorIndex,
+    });
   }
   return {
     version: MEMORY_VERSION,
@@ -92,7 +120,7 @@ export function buildMemoryDatabase(records, chat, edits = [], { throughFloor = 
   };
 }
 
-export function selectMemoryDatabase(database, { budget = 1600, query = '', includeEvents = false, includeIds = false, all = false } = {}) {
+export function selectMemoryDatabase(database, { budget = 1600, query = '', includeEvents = false, includeIds = false, all = false, userName = '' } = {}) {
   const tables = database?.tables ?? {};
   const location = tables.scene?.[0]?.values.location;
   const named = (row) => [row.id, row.values.name, ...(row.values.aliases || '').split(/[、,，;；\n]/)].filter((name) => name?.trim().length >= 2);
@@ -100,16 +128,38 @@ export function selectMemoryDatabase(database, { budget = 1600, query = '', incl
   const people = (tables.characters ?? []).filter((row) => mentioned(row) || (location && row.values.location === location));
   const names = new Set(people.flatMap(named));
   const associated = (...values) => values.some((value) => value && [...names].some((name) => value === name || splitNames(value).includes(name)));
+  const inventoryByName = new Map();
+  for (const row of tables.inventory ?? []) {
+    const name = row.values.name?.trim();
+    if (name) inventoryByName.set(name, [...(inventoryByName.get(name) ?? []), row]);
+  }
+  const explicitlyNamed = (value) => typeof value === 'string' && value.trim().length >= 2 && query.includes(value.trim());
+  const qualifiedInventoryId = (row) => row.id !== row.values.name?.trim() && explicitlyNamed(row.id);
+  const relatedInventory = (row) => qualifiedInventoryId(row)
+    || associated(row.values.holder, row.values.owner)
+    || [row.values.holder, row.values.owner].flatMap(value => splitNames(value)).some(explicitlyNamed)
+    || (row.values.place && (row.values.place === location || explicitlyNamed(row.values.place)));
+  const inventoryMention = (row) => {
+    if (!mentioned(row)) return '';
+    const sameName = inventoryByName.get(row.values.name?.trim()) ?? [];
+    if (sameName.length < 2 || qualifiedInventoryId(row)) return '近期正文明确提及';
+    const related = sameName.filter(relatedInventory);
+    if (related.length) return related.includes(row) ? '同名物品按人物或地点匹配' : '';
+    // With no entity evidence, retain the bounded alternatives without claiming
+    // that a shared name identifies one particular owner's item.
+    return '同名物品，指代待确认';
+  };
   const latestFloor = Math.max(-1, ...Object.values(tables).flat().map((row) => row.floorIndex));
   const candidates = [];
   for (const [table, schema] of Object.entries(MEMORY_TABLES)) {
     if (table === 'events' && !includeEvents) continue;
     for (const row of tables[table] ?? []) {
       let reason = '', priority = 0;
+      const directMention = table === 'inventory' ? inventoryMention(row) : mentioned(row) ? '近期正文明确提及' : '';
       if (all) { reason = '已有状态参考'; priority = 1; }
       if (table === 'player') { reason = '玩家说过的话'; priority = 1000; }
       else if (table === 'scene') { reason = '当前场景'; priority = 100; }
-      else if (mentioned(row)) { reason = '近期正文明确提及'; priority = 90; }
+      else if (directMention) { reason = directMention; priority = directMention === '同名物品，指代待确认' ? 55 : 90; }
       else if (table === 'characters' && people.includes(row)) { reason = '当前地点的人物'; priority = 80; }
       else if (table === 'relationships' && (associated(row.values.from) || associated(row.values.to))) { reason = '相关人物的关系'; priority = 65; }
       else if (table === 'inventory' && associated(row.values.holder, row.values.owner)) { reason = '相关人物持有或拥有'; priority = 70; }
@@ -121,10 +171,13 @@ export function selectMemoryDatabase(database, { budget = 1600, query = '', incl
       if (!reason) continue;
       // Finished or cancelled items stay in the database but yield to open ones.
       if (['tasks', 'clues'].includes(table) && CLOSED_STATE.test(row.values.state || '')) priority -= 30;
-      const facts = Object.entries(row.values).filter(([, value]) => value).map(([field, value]) => `${schema.fields[field]}：${value}`).join('；');
+      // Free-text observations retain their own source even when another field
+      // was updated later. Current structured facts remain separately readable.
+      const facts = Object.entries(row.values).filter(([, value]) => value).map(([field, value]) => `${fieldLabel(table, field, row, schema.fields[field], tables)}：${value}`).join('；');
       if (!facts) continue;
+      const label = table === 'player' ? resolveUserName(userName) : schema.label;
       candidates.push({ table, id: row.id, label: schema.label, text: facts, reason, priority, floorIndex: row.floorIndex,
-        line: `【${schema.label}${includeIds ? ` / ${row.id}` : ''}】${facts}` });
+        line: `【${label}${includeIds ? ` / ${row.id}` : ''}】${facts}` });
     }
   }
   const blocks = [];

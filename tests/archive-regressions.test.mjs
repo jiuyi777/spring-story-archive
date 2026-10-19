@@ -47,7 +47,7 @@ test('uneven floor lengths share the budget and preserve the middle fact', () =>
 
 test('summary API rejects oversized externally supplied payloads before a model call', async () => {
   let calls = 0;
-  await assert.rejects(requestFloorSummaries(async () => { calls += 1; }, { targetFloors: [{ floor: 1, text: 'x'.repeat(100000) }] }), /完整读取预算/);
+  await assert.rejects(requestFloorSummaries(async () => { calls += 1; }, { targetFloors: [{ floor: 1, text: 'x'.repeat(1000000) }] }), /完整读取预算/);
   assert.equal(calls, 0);
 });
 
@@ -68,12 +68,12 @@ test('reopening storage preserves verified coverage and resets interrupted floor
 
 test('oversized floor is read in full across parts before it becomes filterable', async () => {
   const f = fixture();
-  f.sourceChat[0].mes = 'a'.repeat(23000) + 'MIDDLE_FACT' + 'b'.repeat(23000);
+  f.sourceChat[0].mes = 'a'.repeat(230000) + 'MIDDLE_FACT' + 'b'.repeat(230000);
   f.promptChat[0].mes = f.sourceChat[0].mes;
   const parts = [];
   const { storage, engine } = harness(f.sourceChat, async (request) => {
     const payload = payloadOf(request);
-    assert.ok(estimateTokens(request.prompt) <= 6500);
+    assert.ok(estimateTokens(request.prompt) <= 60000);
     parts.push(payload.targetFloors[0].text);
     return responseFor(payload);
   });
@@ -87,7 +87,7 @@ test('oversized floor is read in full across parts before it becomes filterable'
 
 test('failed segment leaves raw floor available and never claims full coverage', async () => {
   const f = fixture();
-  f.sourceChat[0].mes = 'x'.repeat(40000);
+  f.sourceChat[0].mes = 'x'.repeat(400000);
   let calls = 0;
   const { storage, engine } = harness(f.sourceChat, async (request) => {
     if (++calls === 2) throw new Error('segment failed');
@@ -144,11 +144,11 @@ test('legacy truncated checkpoints are ignored and swipe excludes the replaced r
 });
 
 test('compression reads every source character before merging smaller checkpoints', async () => {
-  const text = 'a'.repeat(48000) + 'MIDDLE_FACT' + 'b'.repeat(48000);
+  const text = 'a'.repeat(480000) + 'MIDDLE_FACT' + 'b'.repeat(480000);
   const inputs = [];
   await requestCompression(async ({ messages }) => {
     const payload = JSON.parse(messages[1].content);
-    assert.ok(estimateTokens(messages[1].content) <= 6500);
+    assert.ok(estimateTokens(messages[1].content) <= 60000);
     inputs.push(payload.rollingSummary);
     return JSON.stringify({ summary: 'compressed complete part' });
   }, text, 100);
@@ -279,4 +279,41 @@ test('final outgoing data must contain the whole summary before generation conti
     request.verify({ prompt: 'BEGIN\nTRUNCATED' }, false);
     assert.equal(stops, 1);
   }
+});
+
+test('reading settings again and again never grows the option rules (migration runs once)', async () => {
+  const source = (await import('node:fs/promises')).readFile ? await (await import('node:fs/promises')).readFile(new URL('../index.js', import.meta.url), 'utf8') : '';
+  const start = source.indexOf('function getSettings() {');
+  const end = source.indexOf('\nfunction saveSettings');
+  const store = { 'spring-story-archive': { optionRulesVersion: 2, optionWritingNotes: '所有选项都要符合当前场景。\n不替玩家决定内心。\n所有选项都要符合当前场景。\n不替玩家决定内心。', optionSlots: [{ label: '行动', count: 2, rule: '用第一人称写玩家角色要做的事' }] } };
+  const play = await import('../core/play-prompts.js');
+  const sandbox = { getContext: () => ({ extensionSettings: store }), apiProfiles: null, MODULE_ID: 'spring-story-archive',
+    DEFAULT_SETTINGS: { optionWritingNotes: '', preferenceQuizAnswers: {}, optionRulesVersion: 2, memoryTokenLimit: 20000, advanceModules: null }, SOURCE_KEYS: [], configureStoryScope() {}, configureStorySegments() {}, ...play, ...(await import('../core/preference-quiz.js')), Number, String, Array, Set, Math, Object, Boolean };
+  vm.createContext(sandbox);
+  vm.runInContext(source.slice(start, end), sandbox);
+  const first = sandbox.getSettings().optionWritingNotes;
+  for (let i = 0; i < 5; i += 1) sandbox.getSettings();
+  const later = sandbox.getSettings();
+  assert.equal(later.optionWritingNotes, first);
+  assert.equal(first.split('\n').filter((line) => line.startsWith('所有选项')).length, 1);
+  assert.doesNotMatch(first, /玩家/);
+  assert.doesNotMatch(later.optionSlots[0].rule, /玩家/);
+});
+
+test('the old 6,000 big-summary default moves to 20,000 once; a custom value stays', async () => {
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('function getSettings() {'), source.indexOf('\nfunction saveSettings'));
+  const play = await import('../core/play-prompts.js');
+  const run = (saved) => {
+    const store = { 'spring-story-archive': saved };
+    const sandbox = { getContext: () => ({ extensionSettings: store }), apiProfiles: null, MODULE_ID: 'spring-story-archive', configureStoryScope() {}, configureStorySegments() {},
+      DEFAULT_SETTINGS: { preferenceQuizAnswers: {}, rollupTokenLimit: 20000, rollupVersion: 2, optionRulesVersion: 3 }, SOURCE_KEYS: [], ...play, describeTasteSettings: () => '' };
+    vm.createContext(sandbox); vm.runInContext(body, sandbox);
+    sandbox.getSettings();
+    return sandbox.getSettings().rollupTokenLimit;
+  };
+  assert.equal(run({ rollupTokenLimit: 6000 }), 20000);
+  assert.equal(run({ rollupTokenLimit: 9000 }), 9000);
+  assert.equal(run({}), 20000);
+  assert.equal(run({ rollupTokenLimit: 6000, rollupVersion: 2 }), 6000, 'a 6,000 chosen after the upgrade stays');
 });

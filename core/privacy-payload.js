@@ -1,6 +1,9 @@
+import { storyOnly } from './story-segments.js?v=0.7.3';
 export const RAW_FLOOR_LIMIT = 5;
 export const DEFAULT_RAW_FLOOR_LIMIT = 0;
-export const REMOTE_INPUT_TOKEN_LIMIT = 6500;
+// Real RP floors run to thousands of tokens each; organizing reads whole
+// batches in one request, so the input allowance has to fit several of them.
+export const REMOTE_INPUT_TOKEN_LIMIT = 60000;
 
 export function isControlMessage(message) {
   if (!message?.is_user || message?.is_system) return false;
@@ -12,12 +15,15 @@ function normalizeText(value) {
   return String(value ?? '').replace(/\u0000/g, '').trim();
 }
 
-// The story-options block stays in the reply for display, but it is not story:
-// remote requests (organizing, recall) read the reply without it. Fingerprints
-// keep using the full text so existing records stay valid.
-const OPTIONS_BLOCK = /\s*<chunxu-options>[\s\S]*?(?:<\/chunxu-options>|$)/gi;
+export function resolveUserName(userName = '', chat = []) {
+  return normalizeText(userName) || normalizeText(chat.findLast((message) => message?.is_user && message.name?.trim())?.name) || 'User';
+}
+
+// Only the story is organized or searched: thinking blocks (<planing>,
+// <thinking> …), a <content> wrapper's outside, and the options block are left
+// out. Fingerprints keep using the full text so existing records stay valid.
 export function storyText(value) {
-  return normalizeText(String(value ?? '').replace(OPTIONS_BLOCK, ''));
+  return normalizeText(storyOnly(value));
 }
 
 export function messageStoryText(message) {
@@ -110,7 +116,7 @@ export function buildPrivacyPayload({
   const start = Math.max(0, boundedTarget - effectiveLimit + 1);
   const selectedFloors = effectiveLimit > 0 ? safeChat.slice(start, boundedTarget + 1) : [];
   const totalBudget = Math.max(1000, Math.min(REMOTE_INPUT_TOKEN_LIMIT, Number(inputTokenLimit) || REMOTE_INPUT_TOKEN_LIMIT));
-  const rawBudget = selectedFloors.length ? Math.min(2500, Math.max(800, Math.floor(totalBudget * 0.4))) : 0;
+  const rawBudget = selectedFloors.length ? Math.min(30000, Math.max(800, Math.floor(totalBudget * 0.5))) : 0;
   const perFloorBudget = selectedFloors.length ? Math.max(160, Math.floor(rawBudget / selectedFloors.length)) : 0;
   let contentTruncated = false;
   const recentFloors = selectedFloors.map((message, offset) => {
@@ -120,6 +126,7 @@ export function buildPrivacyPayload({
     return {
     floor: start + offset + 1,
     speaker: message?.is_user ? 'player' : (normalizeText(message?.name) || 'character'),
+    speakerName: normalizeText(message?.name) || (message?.is_user ? 'User' : '旁白'),
     kind: message?.is_system ? 'system' : (message?.is_user ? 'user' : 'assistant'),
     importance: message?.is_user ? 'player-statement' : 'normal',
       text,
@@ -177,6 +184,7 @@ export function buildSummaryBatchPayload({
     targetFloors: floorSources.map(({ floorIndex, message, speaker }) => ({
       floor: floorIndex + 1,
       speaker,
+      speakerName: normalizeText(message?.name) || (message?.is_user ? 'User' : '旁白'),
       kind: message?.is_system ? 'system' : (message?.is_user ? 'user' : 'assistant'),
       importance: message?.is_user ? 'player-statement' : 'normal',
       text: '',
@@ -184,12 +192,13 @@ export function buildSummaryBatchPayload({
   };
   const metadataTokens = estimateTokens(JSON.stringify(emptyPayload));
   const contentBudget = Math.max(100, totalBudget - metadataTokens - 120);
-  const rawBudget = indexes.length ? Math.min(4300, Math.floor(contentBudget * 0.76)) : 0;
+  const rawBudget = indexes.length ? Math.floor(contentBudget * 0.9) : 0;
   let contentTruncated = false;
   const targetFloors = floorSources.map(({ floorIndex, message, sourceText, speaker }) => {
     return {
       floor: floorIndex + 1,
       speaker,
+      speakerName: normalizeText(message?.name) || (message?.is_user ? 'User' : '旁白'),
       kind: message?.is_system ? 'system' : (message?.is_user ? 'user' : 'assistant'),
       importance: message?.is_user ? 'player-statement' : 'normal',
       text: sourceText,

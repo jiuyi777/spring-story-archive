@@ -1,6 +1,6 @@
 // Home page: what the push will do in the coming round, editable, with
 // 换一个 / 这轮不推, the per-chat main-line goal, and what was pushed before.
-import { wayLabel } from '../core/advance-plan.js?v=0.7.2';
+import { wayLabel } from '../core/advance-plan.js?v=0.7.3';
 
 const SOURCE = {
   api: '整理时安排的',

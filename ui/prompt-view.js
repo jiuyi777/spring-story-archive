@@ -1,19 +1,18 @@
 // Home page: the exact request the host sent to the model, message by message,
 // like a prompt inspector. Each message is labelled with where it came from;
-// 春序's own blocks open their memory records for editing, and chat floors
+// 喵喵's own blocks open their memory records for editing, and chat floors
 // can be edited in place (an explicit edit by the player).
-import { buildMemoryEntry } from './memory-view.js?v=0.7.2';
+import { buildMemoryEntry } from './memory-view.js?v=0.7.3';
 
 const ROLE = { system: '系统', user: '用户', assistant: '助手', tool: '工具', developer: '开发者', prompt: '整段提示词' };
 const MARK = {
-  story: ['【春序档案 · 剧情总摘要】', '春序 · 记忆与小结'],
-  recall: ['【春序档案 · 语义回忆】', '春序 · 向量回忆'],
-  options: ['【剧情选项】', '春序 · 剧情选项'],
-  advance: ['【剧情推进】', '春序 · 自主推进'],
+  story: [['【剧情记忆】', '【春序档案 · 剧情总摘要】'], '喵喵 · 记忆与小结'],
+  recall: [['【相关往事】', '【春序档案 · 语义回忆】'], '喵喵 · 向量回忆'],
+  options: ['【剧情选项】', '喵喵 · 剧情选项'],
+  advance: ['【剧情推进】', '喵喵 · 自主推进'],
 };
 
 let view = { recordKey: '', query: '', open: new Set() };
-const tokenCache = new Map();
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -38,16 +37,15 @@ export function locateFloors(messages, floorTexts) {
 }
 
 export function sourceOf(message, floorIndex) {
-  const tags = Object.entries(MARK).filter(([, [marker]]) => message.content.includes(marker)).map(([kind, [, label]]) => ({ kind, label }));
+  const tags = Object.entries(MARK).filter(([, [marker]]) => [marker].flat().some((value) => message.content.includes(value))).map(([kind, [, label]]) => ({ kind, label }));
   if (tags.length) return tags;
   if (Number.isInteger(floorIndex)) return [{ kind: 'floor', label: `聊天第 ${floorIndex + 1} 楼` }];
   return [{ kind: 'host', label: message.role === 'system' ? '预设 / 角色卡 / 世界书' : '其他' }];
 }
 
-function tokensOf(text, countTokens) {
-  const key = `${text.length}:${text.slice(0, 40)}:${text.slice(-40)}`;
-  if (!tokenCache.has(key)) tokenCache.set(key, Promise.resolve(countTokens(text)));
-  return tokenCache.get(key);
+function tokensOf(text, countTokens, tokenCache) {
+  if (!tokenCache.has(text)) tokenCache.set(text, Promise.resolve(countTokens(text)));
+  return tokenCache.get(text);
 }
 
 // Hide rows that do not contain the query, without rebuilding the list.
@@ -103,14 +101,18 @@ export function renderPromptViewer(root, { records = [], chat = [], floorTexts =
   }
 
   const messages = record.finalPrompt;
+  // Share identical text within this render. A later render may use another host tokenizer.
+  const tokenCache = new Map();
   const floors = locateFloors(messages, floorTexts);
   const summary = el('p', 'ssa-round-summary');
   const totalNode = el('span', '', '…');
-  summary.append(`共 ${messages.length} 条消息，合计 `, totalNode, ' token');
-  if (record.budget) summary.append(`；春序带入 ${(record.budget.story + record.budget.recall).toLocaleString()} / 上限 ${record.budget.limit.toLocaleString()}`);
+  summary.append(`共 ${messages.length} 条消息，正文约 `, totalNode, ' token');
+  if (record.budget) summary.append(`；喵喵带入 ${(record.budget.story + record.budget.recall).toLocaleString()} / 上限 ${record.budget.limit.toLocaleString()}`);
   if (record.budget?.dropped?.duplicate) summary.append(`，跳过 ${record.budget.dropped.duplicate} 段重复回忆`);
   if (record.budget?.dropped?.budget) summary.append(`，${record.budget.dropped.budget} 段回忆因额度没带`);
   host.append(summary);
+  const tokenNote = el('small', 'ssa-floor-editor-label', '正在估算正文 token。');
+  host.append(tokenNote);
 
   const search = document.createElement('input');
   search.type = 'search';
@@ -149,12 +151,13 @@ export function renderPromptViewer(root, { records = [], chat = [], floorTexts =
     details.append(body);
     item.append(details);
     list.append(item);
-    void tokensOf(message.content, countTokens).then(({ value, exact }) => { tokens.textContent = `${exact ? '' : '约 '}${value.toLocaleString()}`; });
+    void tokensOf(message.content, countTokens, tokenCache).then(({ value }) => { tokens.textContent = `约 ${value.toLocaleString()}`; });
   });
   host.append(list);
   filterPromptRows(root, view.query);
-  void Promise.all(messages.map((message) => tokensOf(message.content, countTokens))).then((values) => {
+  void Promise.all(messages.map((message) => tokensOf(message.content, countTokens, tokenCache))).then((values) => {
     const total = values.reduce((sum, item) => sum + item.value, 0);
-    totalNode.textContent = `${values.every((item) => item.exact) ? '' : '约 '}${total.toLocaleString()}`;
+    totalNode.textContent = total.toLocaleString();
+    tokenNote.textContent = `${values.every((item) => item.source === 'host') ? '按酒馆估算' : '粗略估算'}，实际用量以 API 为准。`;
   });
 }

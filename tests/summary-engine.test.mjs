@@ -151,7 +151,7 @@ test('ten or twenty short floors each use one API request', async (t) => {
 test('oversized floor content is split across multiple API requests', async () => {
   let calls = 0;
   const { engine } = makeHarness({
-    chat: Array.from({ length: 3 }, (_, index) => ({ mes: `第${index + 1}楼${'长'.repeat(2500)}` })),
+    chat: Array.from({ length: 3 }, (_, index) => ({ mes: `第${index + 1}楼${'长'.repeat(25000)}` })),
     settings: { backfillBatchSize: 20 },
     generateRaw: async (request) => {
       calls += 1;
@@ -161,6 +161,18 @@ test('oversized floor content is split across multiple API requests', async () =
   await engine.reconcile({ queueMissing: true });
   await engine.waitForIdle();
   assert.equal(calls, 3);
+});
+
+test('several long RP floors (thousands of tokens each) are organized in one request', async () => {
+  let calls = 0;
+  const { engine } = makeHarness({
+    chat: Array.from({ length: 8 }, (_, index) => ({ mes: `第${index + 1}楼${'长'.repeat(3500)}`, is_user: index % 2 === 1 })),
+    settings: { backfillBatchSize: 10 },
+    generateRaw: async (request) => { calls += 1; return batchResponse(request); },
+  });
+  await engine.reconcile({ queueMissing: true });
+  await engine.waitForIdle();
+  assert.equal(calls, 1);
 });
 
 test('one omitted model row fails without discarding the other floor summaries', async () => {
@@ -255,15 +267,17 @@ test('the 100th summarized floor creates a compression checkpoint', async () => 
   assert.equal(snapshot.checkpoints[0].throughFloor, 99);
   assert.equal(snapshot.checkpoints[0].status, 'ready');
   assert.match(snapshot.rollup.text, /一百楼压缩总摘要/);
-  assert.match(snapshot.rollup.text, /固定时间线.*第1至100楼/s);
-  assert.equal(snapshot.checkpoints[0].formatVersion, 5);
+  assert.match(snapshot.rollup.text, /时间线.*第1至100楼/s);
+  assert.equal(snapshot.checkpoints[0].formatVersion, 6);
+  assert.equal(snapshot.checkpoints[0].kind, 'chapter');
+  assert.equal(snapshot.checkpoints[0].fromFloor, 0);
 });
 
 test('the configured token ceiling also creates a compression checkpoint', async () => {
   let compressionCalls = 0;
   const { engine, storage, context } = makeHarness({
     chat: [{ mes: '一' }, { mes: '二' }],
-    settings: { rollupTokenLimit: 10 },
+    settings: { rollupTokenLimit: 30 },
     generateRaw: async ({ systemPrompt }) => {
       assert.match(systemPrompt, /总档案员/);
       compressionCalls += 1;

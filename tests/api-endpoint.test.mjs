@@ -34,3 +34,16 @@ test('a real error from the API is reported, not retried elsewhere', async () =>
   }), /401/);
   assert.equal(proxied, false);
 });
+
+test('the big summary follows the custom format and has room to write', async () => {
+  const { requestCompression } = await import('../core/api-client.js');
+  const seen = [];
+  const result = await requestCompression(async (request) => { seen.push(request); return JSON.stringify({ summary: '【主线】雨夜，林栀拉着猫头鹰去甜品店。', timeline: [], characters: [], relationships: [], clues: [], continuityRules: [] }); },
+    '林栀与猫头鹰在长椅上。林栀带猫头鹰去甜品店。', 3, { format: '分成【主线】【人物关系】两段' });
+  assert.match(seen[0].messages[0].content, /summary 字段按指定的格式写.*分成【主线】【人物关系】两段/);
+  assert.ok(seen[0].maxTokens >= 4000);
+  assert.match(result.summary, /【主线】/);
+  const plain = [];
+  await requestCompression(async (request) => { plain.push(request); return JSON.stringify({ summary: 'x' }); }, '甲', 1);
+  assert.doesNotMatch(plain[0].messages[0].content, /按指定的格式写/);
+});

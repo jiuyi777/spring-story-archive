@@ -1643,7 +1643,9 @@
   }
 
   .ssa-tabs {
-    position: fixed;
+    /* Inside the panel, not the page: SillyTavern's transformed <html>
+       can be zero-height, which sends a fixed bottom bar off-screen. */
+    position: absolute;
     z-index: 4;
     right: 0;
     bottom: 0;
@@ -1906,7 +1908,7 @@
   .ssa-footer {
     display: block;
     padding: 8px 16px;
-    margin-bottom: calc(44px + env(safe-area-inset-bottom));
+    margin-bottom: calc(50px + env(safe-area-inset-bottom));
     font-size: 12px;
   }
   .ssa-footer > span:last-child { display: none; }
@@ -2080,7 +2082,7 @@
 /* Database: table tabs as paper tags */
 #spring_story_archive_root .ssa-memory-panel { margin: 0 0 22px; }
 #spring_story_archive_root .ssa-table-chips {
-  display: flex; gap: 6px; margin: 0 -20px 12px; padding: 0 20px 2px; overflow-x: auto; scroll-snap-type: x proximity;
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; padding: 0;
 }
 #spring_story_archive_root .ssa-table-chip {
   flex: none; display: inline-flex; align-items: baseline; gap: 6px;
@@ -2259,7 +2261,6 @@
   #spring_story_archive_root .ssa-band-label { font-size: 11.5px; letter-spacing: .14em; }
   #spring_story_archive_root .ssa-header .ssa-icon-button { top: 5px; right: 8px; width: 28px; height: 28px; min-height: 28px; }
   #spring_story_archive_root .ssa-page { padding: 14px 14px 26px; }
-  #spring_story_archive_root .ssa-table-chips { margin: 0 -14px 12px; padding: 0 14px 2px; }
   #spring_story_archive_root .ssa-tabs { box-shadow: 0 -5px 18px color-mix(in srgb, var(--ssa-deep) 8%, transparent); }
   #spring_story_archive_root .ssa-tabs button { padding: 13px 2px 12px; font-family: var(--ssa-serif); font-size: 13.5px; }
   #spring_story_archive_root .ssa-tabs button.is-active::before { display: none; }
@@ -2303,13 +2304,13 @@
 @media (max-width: 420px) { #spring_story_archive_root .ssa-slot-grid { grid-template-columns: 1fr; } }
 /* 八股删除器 note under a reply — lives in the chat, so it follows the host theme */
 .ssa-cliche-note {
-  display: flex; align-items: center; gap: 10px; margin: 6px 0 2px; padding: 4px 10px;
+  display: block; margin: 6px 0 2px; padding: 4px 10px;
   color: var(--cl-muted, #70786f);
   font-size: .82em; line-height: 1.6; letter-spacing: .03em;
 }
 .ssa-cliche-note button {
-  margin-left: auto; padding: 0 8px; border: 1px solid var(--cl-border, rgba(82,121,108,.46)); border-radius: 4px;
-  color: var(--cl-deep, #3b584b); background: transparent; font: inherit; cursor: pointer;
+  display: inline; margin: 0 0 0 8px; padding: 0; border: 0; border-bottom: 1px solid currentColor; border-radius: 0;
+  color: var(--cl-deep, #3b584b); background: transparent; font: inherit; white-space: nowrap; cursor: pointer;
 }
 /* Home: next / last round, floor by floor */
 #spring_story_archive_root .ssa-round { margin: 0 0 22px; }
@@ -2759,13 +2760,13 @@
 #spring_story_archive_root[data-hero-tone="light"] .ssa-header.ssa-hero .ssa-icon-button { color: var(--ssa-deep) !important; border-color: var(--ssa-border); background: color-mix(in srgb, var(--ssa-paper-strong) 70%, transparent); }
 
 /* Scrolled: a slim band with the title on one line */
-#spring_story_archive_root.is-hero-compact .ssa-header.ssa-hero { height: calc(var(--ssa-hero-compact) + var(--ssa-hero-overlap)); }
-#spring_story_archive_root.is-hero-compact .ssa-hero-text { display: flex; align-items: baseline; gap: 12px; padding-top: 14px; }
-#spring_story_archive_root.is-hero-compact :is(.ssa-hero-kicker, .ssa-hero-sub) { display: none; }
-#spring_story_archive_root.is-hero-compact .ssa-header.ssa-hero .ssa-hero-title { margin: 0; font-size: 20px; }
-#spring_story_archive_root.is-hero-compact .ssa-header.ssa-hero .ssa-hero-num { font-size: 26px; }
-#spring_story_archive_root.is-hero-compact .ssa-header.ssa-hero .ssa-hero-unit { font-size: 14px; }
-#spring_story_archive_root.is-hero-compact .ssa-header.ssa-hero .ssa-icon-button { top: 12px; }
+#spring_story_archive_root:is(.is-hero-compact, .is-page-compact) .ssa-header.ssa-hero { height: calc(var(--ssa-hero-compact) + var(--ssa-hero-overlap)); }
+#spring_story_archive_root:is(.is-hero-compact, .is-page-compact) .ssa-hero-text { display: flex; align-items: baseline; gap: 12px; padding-top: 14px; }
+#spring_story_archive_root:is(.is-hero-compact, .is-page-compact) :is(.ssa-hero-kicker, .ssa-hero-sub) { display: none; }
+#spring_story_archive_root:is(.is-hero-compact, .is-page-compact) .ssa-header.ssa-hero .ssa-hero-title { margin: 0; font-size: 20px; }
+#spring_story_archive_root:is(.is-hero-compact, .is-page-compact) .ssa-header.ssa-hero .ssa-hero-num { font-size: 26px; }
+#spring_story_archive_root:is(.is-hero-compact, .is-page-compact) .ssa-header.ssa-hero .ssa-hero-unit { font-size: 14px; }
+#spring_story_archive_root:is(.is-hero-compact, .is-page-compact) .ssa-header.ssa-hero .ssa-icon-button { top: 12px; }
 
 /* The sheet: whatever comes right after the hero overlaps it with a rounded top */
 #spring_story_archive_root .ssa-main { position: relative; z-index: 2; }
@@ -2782,7 +2783,7 @@
 @media (max-width: 720px) {
   #spring_story_archive_root { --ssa-hero-h: 188px; }
   #spring_story_archive_root .ssa-header.ssa-hero { height: var(--ssa-hero-h); background-color: var(--ssa-deep); }
-  #spring_story_archive_root.is-hero-compact .ssa-header.ssa-hero { height: calc(var(--ssa-hero-compact) + var(--ssa-hero-overlap)); }
+  #spring_story_archive_root:is(.is-hero-compact, .is-page-compact) .ssa-header.ssa-hero { height: calc(var(--ssa-hero-compact) + var(--ssa-hero-overlap)); }
   #spring_story_archive_root .ssa-main {
     margin-top: calc(var(--ssa-hero-overlap) * -1); border-radius: 22px 22px 0 0;
     background: var(--ssa-paper-strong); box-shadow: 0 -8px 24px color-mix(in srgb, var(--ssa-ink) 14%, transparent);
@@ -2890,14 +2891,14 @@
 
 /* Drag handle: pull down to close */
 #spring_story_archive_root .ssa-grip {
-  position: absolute; z-index: 3; left: 50%; bottom: 0; width: 120px; height: 30px; margin-left: -60px;
-  padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none;
+  position: absolute; z-index: 3; left: 0; right: 0; bottom: 0; width: auto; height: var(--ssa-hero-overlap); margin: 0;
+  padding: 0; border: 0; border-radius: 22px 22px 0 0; background: var(--ssa-paper-strong); cursor: grab; touch-action: none;
 }
 #spring_story_archive_root .ssa-grip::after {
-  content: ""; position: absolute; left: 41px; top: 12px; width: 38px; height: 4px; border-radius: 2px; background: var(--ssa-olive);
+  content: ""; position: absolute; left: 50%; top: 10px; width: 38px; height: 4px; margin-left: -19px; border-radius: 2px; background: var(--ssa-olive);
 }
 @media (max-width: 720px) {
-  #spring_story_archive_root .ssa-main::before { display: none; }
+  #spring_story_archive_root .ssa-main::before { content: ""; display: block; width: auto; height: 22px; margin: 0; background: none; }
 }
 #spring_story_archive_root .ssa-app.is-dragging { transition: none; }
 #spring_story_archive_root .ssa-app.is-settling { transition: transform .22s ease; }
@@ -2927,3 +2928,34 @@
 #spring_story_archive_root .ssa-page > .ssa-page-heading:first-child .ssa-page-note { display: none; }
 #spring_story_archive_root .ssa-page > .ssa-page-heading:first-child:not(:has(button)) { display: none; }
 #spring_story_archive_root .ssa-api-bar-label { margin: 0 0 4px; color: var(--ssa-mid); font-size: 13px; letter-spacing: .05em; }
+
+/* SillyTavern puts a transform on <html>, so fixed elements are placed
+   against <html>'s box, which some layouts give zero height. Panel, backdrop
+   and launcher are therefore placed from the measured screen size. */
+#spring_story_archive_root .ssa-backdrop { inset: auto; top: 0; left: 0; width: var(--ssa-vw, 100vw); height: var(--ssa-vh, 100dvh); }
+#spring_story_archive_root .ssa-app {
+  bottom: auto;
+  height: calc(var(--ssa-vh, 100dvh) - max(4vh, calc(var(--topBarBlockSize, 0px) + 8px)) - 4vh);
+}
+@media (max-width: 720px) {
+  #spring_story_archive_root .ssa-app {
+    inset: auto; left: 0; right: auto;
+    top: var(--ssa-top, calc(var(--topBarBlockSize, 0px) + 8px));
+    width: var(--ssa-vw, 100vw);
+    height: calc(var(--ssa-vh, 100dvh) - var(--ssa-top, calc(var(--topBarBlockSize, 0px) + 8px)));
+  }
+}
+
+/* First-run card: one big button first, manual fields tucked away */
+#spring_story_archive_root .ssa-setup-main { display: grid; gap: 8px; }
+#spring_story_archive_root .ssa-setup-main .ssa-primary-button { min-height: 44px; font-size: 15px; letter-spacing: .1em; }
+#spring_story_archive_root .ssa-setup-manual { border-top: 1px dotted var(--ssa-border); padding-top: 8px; }
+#spring_story_archive_root .ssa-setup-manual > summary { color: var(--ssa-mid); font-size: 13px; letter-spacing: .05em; cursor: pointer; list-style: none; }
+#spring_story_archive_root .ssa-setup-manual > summary::-webkit-details-marker { display: none; }
+#spring_story_archive_root .ssa-setup-manual[open] > summary { margin-bottom: 10px; }
+#spring_story_archive_root .ssa-setup-manual > label { margin-bottom: 8px; }
+/* Settings groups: current state on the right */
+#spring_story_archive_root .ssa-settings-group > summary .ssa-group-state {
+  position: absolute; top: 12px; right: 30px; color: var(--ssa-muted); font-family: var(--ssa-label); font-size: 12px; letter-spacing: .04em;
+}
+#spring_story_archive_root .ssa-group-state[data-on="true"] { color: var(--ssa-deep); }

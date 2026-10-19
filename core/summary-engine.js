@@ -8,9 +8,12 @@ import {
   isControlMessage,
   storyText,
   messageStoryText,
-} from './privacy-payload.js?v=0.7.2';
-import { createProvider, requestCompression, requestFloorSummaries } from './api-client.js?v=0.7.2';
-import { MEMORY_VERSION, isCompatibleMemoryVersion, buildMemoryDatabase, formatMemoryDatabase, memorySchemaForPrompt, validateMemoryChanges, applyNarrativeEdits } from './memory-database.js?v=0.7.2';
+  resolveUserName,
+  REMOTE_INPUT_TOKEN_LIMIT,
+} from './privacy-payload.js?v=0.7.3';
+import { createProvider, requestChapter, requestFloorSummaries } from './api-client.js?v=0.7.3';
+import { CHAPTER_FORMAT, chapterRange, formatChapter, selectChapters, uncoveredRuns, chaptersToMerge } from './chapters.js?v=0.7.3';
+import { MEMORY_VERSION, isCompatibleMemoryVersion, buildMemoryDatabase, formatMemoryDatabase, memorySchemaForPrompt, validateMemoryChanges, applyNarrativeEdits } from './memory-database.js?v=0.7.3';
 
 function nowIso() {
   return new Date().toISOString();
@@ -49,7 +52,7 @@ function messageMetadata(message) {
   return {
     isUser,
     priority: isUser ? 'player-statement' : 'normal',
-    speakerName: String(message?.name ?? (isUser ? '玩家' : '角色')).trim(),
+    speakerName: String(message?.name ?? (isUser ? 'User' : '旁白')).trim(),
     userText: isUser ? String(message?.mes ?? '') : '',
   };
 }
@@ -61,19 +64,19 @@ function formatFactLine(label, items) {
 export function formatCheckpoint(checkpoint) {
   if (!checkpoint?.summary) return '';
   return [
-    `【压缩总摘要】${checkpoint.summary}`,
-    formatFactLine('【固定时间线】', checkpoint.timeline),
+    `【往事】${checkpoint.summary}`,
+    formatFactLine('【时间线】', checkpoint.timeline),
     formatFactLine('【人物状态】', checkpoint.characters),
     formatFactLine('【人物关系】', checkpoint.relationships),
     formatFactLine('【未解决线索】', checkpoint.clues),
-    formatFactLine('【连续性规则】', checkpoint.continuityRules),
+    formatFactLine('【既定事实】', checkpoint.continuityRules),
   ].join('').trim();
 }
 
 export function formatFloorRecord(record) {
-  const type = record.isUser ? '玩家原文记录' : '角色回复';
+  const name = String(record.speakerName || (record.isUser ? 'User' : '旁白')).trim();
   return [
-    `【${type}】第 ${record.floorIndex + 1} 楼：${record.summary}`,
+    `【${name} · 往事】${record.summary}`,
     formatFactLine('时间线', record.timeline),
     formatFactLine('人物状态', record.characters),
     formatFactLine('人物关系', record.relationships),
@@ -298,12 +301,13 @@ export class SummaryEngine {
   takeNextRequestBatch() {
     const context = this.getContext();
     const maxFloors = Math.min(20, Math.max(1, Number(this.getSettings().backfillBatchSize) || 10));
-    const rawTokenBudget = 4300;
+    // Room for floor text in one organizing request; long RP floors fill it fast.
+    const rawTokenBudget = REMOTE_INPUT_TOKEN_LIMIT - 12000;
     const batch = [];
     let usedTokens = 0;
     while (this.queue.length && batch.length < maxFloors) {
       const floorIndex = this.queue[0];
-      const messageTokens = estimateTokens(context.chat?.[floorIndex]?.mes ?? '');
+      const messageTokens = estimateTokens(messageStoryText(context.chat?.[floorIndex]));
       if (batch.length && usedTokens + Math.min(messageTokens, rawTokenBudget) > rawTokenBudget) break;
       if (batch.length) {
         try { buildSummaryBatchPayload({ chat: context.chat, floorIndexes: [...batch, floorIndex] }); }
@@ -462,9 +466,9 @@ export class SummaryEngine {
       ? { existingNpcs: (await this.storage.listNpcs(this.chatKey)).map((npc) => npc.name).filter(Boolean).slice(-12) }
       : null;
     const makePayload = (inputChat, indexes) => {
-      const payload = buildSummaryBatchPayload({ chat: inputChat, floorIndexes: indexes, rollingSummary, inputTokenLimit: 5400 });
+      const payload = buildSummaryBatchPayload({ chat: inputChat, floorIndexes: indexes, rollingSummary, inputTokenLimit: REMOTE_INPUT_TOKEN_LIMIT - 8000 });
       payload.memorySchema = memorySchemaForPrompt();
-      payload.currentMemory = formatMemoryDatabase(memory, { budget: 500, includeIds: true, query: batch.map((index) => chat[index]?.mes ?? '').join('\n') });
+      payload.currentMemory = formatMemoryDatabase(memory, { userName: resolveUserName(this.getContext().name1, chat), budget: 500, includeIds: true, query: batch.map((index) => chat[index]?.mes ?? '').join('\n') });
       if (npcWatch) payload.npcWatch = npcWatch;
       if (advanceWatch) payload.advanceWatch = advanceWatch;
       const summaryFormat = String(this.getSettings?.().summaryFormat ?? '').trim();
@@ -481,7 +485,7 @@ export class SummaryEngine {
     const results = [];
     for (const floorIndex of batch) {
       const text = messageStoryText(chat[floorIndex]);
-      const parts = splitInputText(text, (part) => JSON.stringify({ text: part }), 2500);
+      const parts = splitInputText(text, (part) => JSON.stringify({ text: part }), REMOTE_INPUT_TOKEN_LIMIT - 20000);
       const summaries = [];
       const segments = parts.length ? parts : [''];
       for (const [partIndex, part] of segments.entries()) {
@@ -510,44 +514,49 @@ export class SummaryEngine {
     const revision = this.chatRevision;
     if (!chatKey) return null;
     const settings = this.getSettings();
+    const limit = Math.max(1, Number(settings.rollupTokenLimit) || 20000);
     const edits = await this.storage.getProfile(`${chatKey}::memory-edits`);
-    const ready = applyNarrativeEdits(validSummaries(await this.storage.listSummaries(chatKey), this.getContext().chat), edits?.edits);
-    const checkpoints = (await this.storage.listCheckpoints(chatKey))
-      .filter((checkpoint) => checkpoint.status === 'ready')
-      .sort((left, right) => right.throughFloor - left.throughFloor);
-    const validCheckpoint = checkpoints.find((checkpoint) => {
-      const source = ready.filter((record) => record.floorIndex <= checkpoint.throughFloor);
-      return checkpoint.formatVersion === 5 && checkpoint.sourceFingerprint === fingerprintSummaries(source);
-    });
-    const afterCheckpoint = validCheckpoint
-      ? ready.filter((record) => record.floorIndex > validCheckpoint.throughFloor)
-      : ready;
-    const parts = [];
-    if (validCheckpoint?.summary) parts.push(formatCheckpoint(validCheckpoint));
-    parts.push(...afterCheckpoint.map(formatFloorRecord));
-    const text = parts.join('\n').trim();
+    const chat = this.getContext().chat;
+    const ready = applyNarrativeEdits(validSummaries(await this.storage.listSummaries(chatKey), chat), edits?.edits);
+    const checkpoints = await this.storage.listCheckpoints(chatKey);
+    const chapters = selectChapters(checkpoints, ready);
+    const runs = uncoveredRuns(chapters, ready);
+    const tail = runs.find((run) => !run.closed)?.records ?? [];
+    const floorText = (record) => formatFloorRecord({ ...record, ...messageMetadata(chat[record.floorIndex]) });
+    // Story order: chapters and any floors not yet in a chapter.
+    const pieces = [
+      ...chapters.map((chapter) => ({ at: chapterRange(chapter).from, text: formatChapter(chapter) })),
+      ...runs.flatMap((run) => run.records.map((record) => ({ at: record.floorIndex, text: floorText(record) }))),
+    ].sort((x, y) => x.at - y.at);
+    const text = pieces.map((piece) => piece.text).join('\n').trim();
     const throughFloor = ready.at(-1)?.floorIndex ?? -1;
-    const tokenEstimate = estimateTokens(text);
+    const tailTokens = estimateTokens(tail.map(floorText).join('\n'));
     const rollup = {
       chatKey,
       text,
       throughFloor,
       readyFloors: ready.length,
-      tokenEstimate,
-      checkpointFloor: validCheckpoint?.throughFloor ?? -1,
+      tokenEstimate: estimateTokens(text),
+      pendingTokens: tailTokens,
+      chapterCount: chapters.length,
+      checkpointFloor: chapters.length ? chapterRange(chapters.at(-1)).through : -1,
       status: 'ready',
       error: '',
       updatedAt: nowIso(),
     };
     if (revision !== this.chatRevision) return null;
     await this.storage.putRollup(rollup);
-    if (revision !== this.chatRevision) return null;
+    if (revision !== this.chatRevision || !allowCompression || !ready.length) return rollup;
 
-    const reachesHundred = throughFloor >= 0 && (throughFloor + 1) % 100 === 0 && validCheckpoint?.throughFloor !== throughFloor;
-    const reachesTokenLimit = tokenEstimate >= Number(settings.rollupTokenLimit || 6000) && validCheckpoint?.throughFloor !== throughFloor;
-    if (allowCompression && ready.length && (forceCompression || reachesHundred || reachesTokenLimit)) {
-      return this.compressRollup(rollup, ready);
+    // A chapter whose floors changed is rewritten from its floors alone.
+    const hole = runs.find((run) => run.closed);
+    if (hole) return this.writeChapter(rollup, hole.records, { ready, chapters, checkpoints, limit });
+    const reachesHundred = tail.length > 0 && (throughFloor + 1) % 100 === 0;
+    if (tail.length && (forceCompression || reachesHundred || tailTokens >= limit)) {
+      return this.writeChapter(rollup, tail, { ready, chapters, checkpoints, limit, force: forceCompression });
     }
+    const merge = chaptersToMerge(chapters, ready, limit);
+    if (merge.length) return this.writeVolume(rollup, merge, { ready, checkpoints });
     return rollup;
   }
 
@@ -555,71 +564,82 @@ export class SummaryEngine {
     return this.refreshRollup({ allowCompression: true, forceCompression: true });
   }
 
-  async compressRollup(rollup, ready) {
+  // A failed chapter is not retried on every new floor; it waits a little.
+  recentlyFailed(checkpoints, key) {
+    const failed = checkpoints.find((item) => item.key === key && item.status === 'failed');
+    return Boolean(failed && Date.now() - Date.parse(failed.updatedAt) < 120000);
+  }
+
+  async writeChapter(rollup, records, { ready, chapters, checkpoints, limit, force = false }) {
     const chatKey = rollup.chatKey;
     const revision = this.chatRevision;
     const isCurrent = () => this.chatKey === chatKey && this.chatRevision === revision;
-    if (!isCurrent()) return null;
-    const settings = this.getSettings();
-    const throughFloor = rollup.throughFloor;
-    const key = checkpointKey(chatKey, throughFloor);
-    const source = ready.filter((record) => record.floorIndex <= throughFloor);
-    await this.storage.putCheckpoint({
-      key,
-      chatKey,
-      throughFloor,
-      status: 'processing',
-      summary: '',
-      timeline: [],
-      characters: [],
-      relationships: [],
-      clues: [],
-      continuityRules: [],
-      sourceFingerprint: fingerprintSummaries(source),
-      formatVersion: 5,
-      error: '',
-      updatedAt: nowIso(),
-    });
+    const chat = this.getContext().chat;
+    const floorText = (record) => formatFloorRecord({ ...record, ...messageMetadata(chat[record.floorIndex]) });
+    // A long backlog (an old chat organized at once) becomes several chapters
+    // of about the threshold each, not one chapter for everything.
+    let slice = records;
+    if (estimateTokens(records.map(floorText).join('\n')) > limit * 2) {
+      let used = 0;
+      slice = [];
+      for (const record of records) {
+        const cost = estimateTokens(floorText(record));
+        if (slice.length && used + cost > limit) break;
+        slice.push(record);
+        used += cost;
+      }
+    }
+    const from = slice[0].floorIndex;
+    const through = slice.at(-1).floorIndex;
+    const key = `${chatKey}::chapter::${from}-${through}`;
+    if (!force && this.recentlyFailed(checkpoints, key)) return rollup;
+    const base = { key, chatKey, kind: 'chapter', fromFloor: from, throughFloor: through, formatVersion: CHAPTER_FORMAT, sourceFingerprint: fingerprintSummaries(slice) };
+    await this.storage.putCheckpoint({ ...base, status: 'processing', summary: '', error: '', updatedAt: nowIso() });
     await this.onChange();
     try {
-      if (!isCurrent()) return null;
-      const compressed = await requestCompression(this.makeProvider(settings.summarySource), rollup.text, throughFloor + 1);
-      if (!isCurrent()) return null;
-      const latest = validSummaries(await this.storage.listSummaries(chatKey), this.getContext().chat)
-        .filter((record) => record.floorIndex <= throughFloor);
-      if (!isCurrent() || fingerprintSummaries(latest) !== fingerprintSummaries(source)) return null;
-      await this.storage.putCheckpoint({
-        key,
-        chatKey,
-        throughFloor,
-        status: 'ready',
-        ...compressed,
-        sourceFingerprint: fingerprintSummaries(source),
-        formatVersion: 5,
-        error: '',
-        updatedAt: nowIso(),
+      const before = chapters.filter((chapter) => chapterRange(chapter).through < from).at(-1);
+      const settings = this.getSettings();
+      const written = await requestChapter(this.makeProvider(settings.summarySource), slice.map(floorText).join('\n'), {
+        format: settings.rollupFormat,
+        previous: before ? formatChapter(before, { brief: true }) : '',
       });
+      if (!isCurrent()) return null;
+      const latestEdits = await this.storage.getProfile(`${chatKey}::memory-edits`);
+      const latest = applyNarrativeEdits(validSummaries(await this.storage.listSummaries(chatKey), this.getContext().chat), latestEdits?.edits)
+        .filter((record) => record.floorIndex >= from && record.floorIndex <= through);
+      if (fingerprintSummaries(latest) !== base.sourceFingerprint) return null;
+      await this.storage.putCheckpoint({ ...base, status: 'ready', ...written, error: '', updatedAt: nowIso() });
+      // Keep going while a backlog is left; each pass writes one chapter.
+      return isCurrent() ? this.refreshRollup({ allowCompression: true }) : null;
+    } catch (error) {
+      if (!isCurrent()) return null;
+      await this.storage.putCheckpoint({ ...base, status: 'failed', summary: '', error: errorText(error), updatedAt: nowIso() });
+      await this.storage.putRollup({ ...rollup, status: 'failed', error: errorText(error), updatedAt: nowIso() });
+      await this.onChange();
+      return { ...rollup, status: 'failed', error: errorText(error), rateLimited: isRateLimitError(error) };
+    }
+  }
+
+  async writeVolume(rollup, items, { ready, checkpoints }) {
+    const chatKey = rollup.chatKey;
+    const revision = this.chatRevision;
+    const isCurrent = () => this.chatKey === chatKey && this.chatRevision === revision;
+    const from = chapterRange(items[0]).from;
+    const through = chapterRange(items.at(-1)).through;
+    const source = ready.filter((record) => record.floorIndex >= from && record.floorIndex <= through);
+    const key = `${chatKey}::volume::${from}-${through}`;
+    if (this.recentlyFailed(checkpoints, key)) return rollup;
+    const base = { key, chatKey, kind: 'volume', fromFloor: from, throughFloor: through, formatVersion: CHAPTER_FORMAT, sourceFingerprint: fingerprintSummaries(source) };
+    await this.storage.putCheckpoint({ ...base, status: 'processing', summary: '', error: '', updatedAt: nowIso() });
+    try {
+      const settings = this.getSettings();
+      const written = await requestChapter(this.makeProvider(settings.summarySource), items.map((item) => formatChapter(item)).join('\n\n'), { format: settings.rollupFormat, kind: 'volume' });
+      if (!isCurrent()) return null;
+      await this.storage.putCheckpoint({ ...base, status: 'ready', ...written, error: '', updatedAt: nowIso() });
       return isCurrent() ? this.refreshRollup({ allowCompression: false }) : null;
     } catch (error) {
       if (!isCurrent()) return null;
-      await this.storage.putCheckpoint({
-        key,
-        chatKey,
-        throughFloor,
-        status: 'failed',
-        summary: '',
-        timeline: [],
-        characters: [],
-        relationships: [],
-        clues: [],
-        continuityRules: [],
-        sourceFingerprint: fingerprintSummaries(source),
-        formatVersion: 5,
-        error: errorText(error),
-        updatedAt: nowIso(),
-      });
-      await this.storage.putRollup({ ...rollup, status: 'failed', error: errorText(error), updatedAt: nowIso() });
-      await this.onChange();
+      await this.storage.putCheckpoint({ ...base, status: 'failed', summary: '', error: errorText(error), updatedAt: nowIso() });
       return { ...rollup, status: 'failed', error: errorText(error), rateLimited: isRateLimitError(error) };
     }
   }

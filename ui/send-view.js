@@ -1,4 +1,4 @@
-import { buildMemoryEntry } from './memory-view.js?v=0.7.2';
+import { buildMemoryEntry } from './memory-view.js?v=0.7.3';
 const STATUS = { prepared: '正在准备', verified: '等待回复', received: '已收到回复', stopped: '已停止', ended: '未确认收到回复', interrupted: '未确认收到回复' };
 export function renderSendHistory(root, records, database = null) {
   const list = root.querySelector('[data-role="send-records"]');

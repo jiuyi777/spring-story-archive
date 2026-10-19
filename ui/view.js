@@ -1,13 +1,14 @@
-import { ADVANCE_MODULES } from '../core/play-prompts.js?v=0.7.2';
-import { DEFAULT_CLICHE_RULES } from '../core/cliche-filter.js?v=0.7.2';
-import { GENRE_GROUPS, TASTE_QUESTIONS, MBTI_TYPES } from '../core/preference-quiz.js?v=0.7.2';
+import { ADVANCE_MODULES } from '../core/play-prompts.js?v=0.7.3';
+import { DEFAULT_CLICHE_RULES } from '../core/cliche-filter.js?v=0.7.3';
+import { isCompatibleMemoryVersion } from '../core/memory-database.js?v=0.7.3';
+import { GENRE_GROUPS, TASTE_QUESTIONS, MBTI_TYPES } from '../core/preference-quiz.js?v=0.7.3';
 import {
   PREFERENCE_QUIZ_ITEMS,
   PREFERENCE_QUIZ_SCALE,
   PREFERENCE_QUIZ_SOURCE,
   PREFERENCE_TRAIT_LABELS,
   STORY_EXPERIENCE_OPTIONS,
-} from '../core/preference-quiz.js?v=0.7.2';
+} from '../core/preference-quiz.js?v=0.7.3';
 
 const LAUNCHER_POSITION_KEY = 'spring-story-archive:launcher-position';
 const LAUNCHER_VIEWPORT_MARGIN = 6;
@@ -72,19 +73,19 @@ function preferenceQuizMarkup() {
   `).join('');
 }
 
-import { renderHero, applyHeroArt, watchHeroScroll, HERO_ARTS } from './hero.js?v=0.7.2';
+import { renderHero, applyHeroArt, watchHeroScroll, HERO_ARTS } from './hero.js?v=0.7.3';
 
 export function createArchiveShell() {
   const root = document.createElement('div');
   root.id = 'spring_story_archive_root';
   root.dataset.extensionId = 'spring-story-archive';
   root.innerHTML = `
-    <button class="ssa-launcher" type="button" data-action="open" aria-label="打开春序档案">
+    <button class="ssa-launcher" type="button" data-action="open" aria-label="打开喵喵数据库">
       <span class="ssa-launcher-flower" aria-hidden="true">✿</span>
-      <span class="ssa-launcher-label">春序</span>
+      <span class="ssa-launcher-label">喵喵</span>
     </button>
     <div class="ssa-backdrop" data-action="close" hidden></div>
-    <section class="ssa-app" role="dialog" aria-modal="true" aria-label="春序档案" hidden>
+    <section class="ssa-app" role="dialog" aria-modal="true" aria-label="喵喵数据库" hidden>
       <header class="ssa-header ssa-hero">
         <div class="ssa-hero-art" aria-hidden="true">
           <svg class="ssa-hero-mist" viewBox="0 0 390 200" preserveAspectRatio="none">
@@ -95,8 +96,8 @@ export function createArchiveShell() {
           </svg>
         </div>
         <div class="ssa-hero-text">
-          <p class="ssa-hero-kicker" data-role="hero-kicker">春序</p>
-          <h1 class="ssa-hero-title" data-role="hero-title">春序档案</h1>
+          <p class="ssa-hero-kicker" data-role="hero-kicker">喵喵</p>
+          <h1 class="ssa-hero-title" data-role="hero-title">喵喵数据库</h1>
           <p class="ssa-hero-sub" data-role="hero-sub"></p>
         </div>
         <button class="ssa-icon-button" type="button" data-action="close" aria-label="关闭">×</button>
@@ -185,13 +186,6 @@ export function createArchiveShell() {
           <h3 class="ssa-section-title">偏好测试</h3>
           <p class="ssa-muted" data-role="taste-summary"></p>
           <div class="ssa-player-preference">
-          <article class="ssa-advance-hero">
-            <div class="ssa-hero-mark" aria-hidden="true">春</div>
-            <div>
-              <h2>偏好测试</h2>
-              <p>10 道题和几项剧情体验，推进会按结果安排剧情。</p>
-            </div>
-          </article>
 
           <section class="ssa-preference-entry" data-role="preference-entry">
             <div>
@@ -208,16 +202,21 @@ export function createArchiveShell() {
         </section>
         <section class="ssa-page is-active" data-page="sending">
           <section class="ssa-setup" data-role="setup-card" hidden aria-label="连接整理接口">
-            <h3 class="ssa-setup-title">先连上整理用的接口</h3>
-            <p class="ssa-setup-note">春序每楼整理一次剧情，用这里的接口。连上之后就不用再管了。</p>
-            <label>接口地址<input type="url" inputmode="url" autocomplete="off" placeholder="https://…/v1" data-setting="extraEndpoint"></label>
-            <label>API Key<input type="password" autocomplete="new-password" placeholder="sk-…" data-secret="extraApiKey"></label>
-            <label>模型<input type="text" list="ssa-extra-model-list" autocomplete="off" placeholder="填好上面两项后自动读取" data-setting="extraModel"></label>
-            <p class="ssa-setup-error" data-role="setup-error" hidden></p>
-            <div class="ssa-setup-actions">
-              <button class="ssa-primary-button" type="button" data-action="setup-connect">连接</button>
-              <button class="ssa-text-button" type="button" data-action="setup-skip">先用酒馆当前的 API</button>
+            <h3 class="ssa-setup-title">整理剧情用哪个接口</h3>
+            <p class="ssa-setup-note">喵喵每楼整理一次剧情。直接用酒馆正在用的接口最省事，也可以单独填一个便宜的。</p>
+            <div class="ssa-setup-main">
+              <button class="ssa-primary-button" type="button" data-action="setup-skip">用酒馆当前的 API</button>
             </div>
+            <details class="ssa-setup-manual">
+              <summary>单独填一个整理用的接口</summary>
+              <label>接口地址<input type="url" inputmode="url" autocomplete="off" placeholder="https://…/v1" data-setting="extraEndpoint"></label>
+              <label>API Key<input type="password" autocomplete="new-password" placeholder="sk-…" data-secret="extraApiKey"></label>
+              <label>模型<input type="text" list="ssa-extra-model-list" autocomplete="off" placeholder="填好上面两项后自动读取" data-setting="extraModel"></label>
+              <p class="ssa-setup-error" data-role="setup-error" hidden></p>
+              <div class="ssa-setup-actions">
+                <button class="ssa-secondary-button" type="button" data-action="setup-connect">连接</button>
+              </div>
+            </details>
           </section>
           <section class="ssa-overview" data-role="overview" aria-label="当前状态" aria-live="polite"></section>
           <section class="ssa-push" data-role="push-card" aria-label="下一轮推进" hidden></section>
@@ -361,9 +360,9 @@ export function createArchiveShell() {
               <label>自动同步频率<select data-setting="memoryUpdateEvery"><option value="1">每轮回复</option><option value="2">每 2 轮</option><option value="3">每 3 轮</option><option value="5">每 5 轮</option></select></label>
               <label>积累多少内容后同步<input type="number" min="0" max="10000" step="100" data-setting="memoryMinTokens"><small>新内容攒到这么多 token 再整理；填 0 每楼都整理。</small></label>
             </div>
-            <label>春序每轮最多带入（token）
+            <label>喵喵每轮最多带入（token）
               <input type="number" min="1000" max="1000000" step="1000" inputmode="numeric" data-setting="memoryTokenLimit">
-              <small>每轮带入的玩家记录、剧情状态、小结和回忆总量，最多 1,000,000。超出时先少带回忆，再少带早期小结。</small>
+              <small>只算喵喵自己加进去的：你的偏好、剧情状态、小结、大总结和回忆。最近几楼的聊天原文由酒馆照常发送，不算在里面。超出时先少带回忆，再少带早期小结。</small>
             </label>
             <label>摘要格式（可选）
               <textarea rows="3" data-setting="summaryFormat" placeholder="留空用默认写法：谁在何时何地做了什么、结果如何，一两句。&#10;例：【时间｜地点】人物：做了什么 → 结果"></textarea>
@@ -383,9 +382,25 @@ export function createArchiveShell() {
               <span class="ssa-switch-copy"><strong>自动整理旧楼层</strong><small>打开没整理过的聊天时，在后台分批补上旧楼层。</small></span>
               ${switchControlMarkup('autoBackfill', '自动整理旧楼层')}
             </label>
-            <label>自动压缩阈值（token）
+            <label>整理读取范围
+              <select data-setting="storyScope">
+                <option value="auto">自动：去掉思维链，有 &lt;content&gt; 时只读里面（推荐）</option>
+                <option value="content">只读 &lt;content&gt; 里的正文</option>
+                <option value="untagged">只读不在标签里的文字</option>
+              </select>
+              <small>默认跳过：&lt;planing&gt;、&lt;thinking&gt;、&lt;think&gt; 等思维链，&lt;image&gt;/&lt;imgthink&gt; 生图提示，&lt;choice&gt; 选项，&lt;details&gt; 折叠块，状态栏。这些不整理、不进记忆，八股删除器也不改。</small>
+            </label>
+            <label>另外要跳过的标签（可选）
+              <input type="text" data-setting="storyExtraTags" placeholder="例：status, 小剧场, snow">
+              <small>预设里还有别的不算剧情的标签，就写在这里，用逗号隔开。</small>
+            </label>
+            <label>大总结阈值（token）
               <input type="number" min="1000" max="200000" step="1000" data-setting="rollupTokenLimit">
-              <small>达到阈值后整理长期剧情。</small>
+              <small>每楼小结加起来到这么多，或每满 100 楼，就压成一份大总结。默认 20,000。</small>
+            </label>
+            <label>大总结格式（可选）
+              <textarea rows="3" data-setting="rollupFormat" placeholder="留空用默认写法：按时间顺序讲清楚发生过的主要事件和现在的局面。&#10;例：分成【主线】【人物关系】【未解决的事】三段，每段不超过 300 字"></textarea>
+              <small>大总结的正文按这里写；人物状态、关系、线索还会另外整理。</small>
             </label>
           </article>
 
@@ -413,7 +428,7 @@ export function createArchiveShell() {
               </div>
             </div>
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>用正则美化显示</strong><small>在酒馆正则里加三条“春序 · 剧情选项”脚本，负责排成卡片、发送时去掉选项。样式可以在正则面板里改。</small></span>
+              <span class="ssa-switch-copy"><strong>用正则美化显示</strong><small>在酒馆正则里加三条“喵喵 · 剧情选项”脚本，负责排成卡片、发送时去掉选项。样式可以在正则面板里改。</small></span>
               ${switchControlMarkup('optionRegexEnabled', '用正则美化显示')}
             </label>
             <button class="ssa-secondary-button" type="button" data-action="reset-option-regex">恢复默认美化正则</button>
@@ -495,8 +510,12 @@ export function createArchiveShell() {
               ${switchControlMarkup('summaryContextEnabled', '每次回复前发送总摘要')}
             </label>
             <label class="ssa-switch-row">
-              <span class="ssa-switch-copy"><strong>过滤已摘要的旧楼层原文</strong><small>只发最近 5 楼原文，更早的用摘要代替。聊天记录本身不变。</small></span>
+              <span class="ssa-switch-copy"><strong>过滤已摘要的旧楼层原文</strong><small>最近几楼照常发原文，更早的用摘要代替。聊天记录本身不变。</small></span>
               ${switchControlMarkup('filterArchivedFloors', '过滤已摘要的旧楼层原文')}
+            </label>
+            <label>最近几楼发原文
+              <input type="number" min="1" max="100" step="1" inputmode="numeric" data-setting="recentRawFloors">
+              <small>这几楼由酒馆当聊天记录照常发送，不算进喵喵的带入量。默认 5。</small>
             </label>
             <p class="ssa-muted" data-role="story-context-status" role="status">等待下次回复前读取剧情总摘要</p>
           </article>
@@ -506,10 +525,6 @@ export function createArchiveShell() {
               <h2>摘要压缩与楼层显示</h2>
             </div>
             <div class="ssa-summary-control-grid">
-              <label>自动压缩阈值（token）
-                <input type="number" min="1000" max="200000" step="1000" data-setting="rollupTokenLimit">
-                <small>总摘要到这个长度或每满 100 楼时压缩一次。</small>
-              </label>
               <label>默认展开最近楼层
                 <select data-setting="expandedFloorCount">
                   <option value="3">最近 3 楼</option>
@@ -589,6 +604,8 @@ export function createArchiveShell() {
   bindLauncherSwipe(root);
   watchHeroScroll(root);
   renderHero(root, {});
+  watchViewport(root);
+  addExtensionsMenuEntry(root);
   return root;
 }
 
@@ -760,7 +777,7 @@ function bindLauncherSwipe(root) {
 export function setLauncherDocked(root, docked) {
   const launcher = root.querySelector('.ssa-launcher');
   root.classList.toggle('is-launcher-docked', docked);
-  launcher.setAttribute('aria-label', docked ? '显示春序悬浮球' : '打开春序档案');
+  launcher.setAttribute('aria-label', docked ? '显示喵喵悬浮球' : '打开喵喵数据库');
 }
 
 function makeFactGroup(title, items) {
@@ -884,9 +901,9 @@ export function renderSnapshot(root, snapshot, { expandedFloorCount = 5, resetDi
   const rollup = snapshot.rollup;
   root.querySelector('[data-role="rollup-text"]').textContent = rollup?.text || '还没有可用摘要。';
   const skippedCount = snapshot.summaries.filter((record) => record.status === 'skipped').length;
-  root.querySelector('[data-role="rollup-floor"]').textContent = `已摘要 ${rollup?.readyFloors ?? 0} / ${(snapshot.totalFloors ?? snapshot.summaries.length) - skippedCount} 楼${skippedCount ? ` · ${skippedCount} 条操作指令免总结` : ''}`;
+  root.querySelector('[data-role="rollup-floor"]').textContent = `已摘要 ${rollup?.readyFloors ?? 0} / ${(snapshot.totalFloors ?? snapshot.summaries.length) - skippedCount} 楼${rollup?.chapterCount ? ` · 已写成 ${rollup.chapterCount} 章` : ''}${skippedCount ? ` · ${skippedCount} 条操作指令免总结` : ''}`;
   root.querySelector('[data-role="rollup-token"]').textContent = `约 ${rollup?.tokenEstimate ?? 0} token`;
-  const missingCount = snapshot.summaries.filter((record) => ['missing', 'failed'].includes(record.status) || (record.status === 'ready' && (record.inputComplete !== true || record.memoryVersion !== 1))).length;
+  const missingCount = snapshot.summaries.filter((record) => ['missing', 'failed'].includes(record.status) || (record.status === 'ready' && (record.inputComplete !== true || !isCompatibleMemoryVersion(record.memoryVersion)))).length;
   const backfillStatus = root.querySelector('[data-role="backfill-status"]');
   if (backfillStatus) backfillStatus.textContent = `待补全 ${missingCount} 楼`;
 }
@@ -1169,6 +1186,31 @@ export const UI_THEMES = [
   { id: 'cliff', name: '海崖', note: '草绿加一点海蓝', colors: ['#2a472f', '#839d45', '#92ab76', '#77aad7', '#e8e9c0'] },
 ];
 
+const GROUP_STATE = {
+  'API 接口': (st) => (st.organizeProfileId || st.extraEndpoint ? ['已连接', true] : ['用酒馆的', false]),
+  '外观': (st) => [UI_THEMES.find((theme) => theme.id === st.uiTheme)?.name ?? '春来', false],
+  '自动记忆': (st) => (st.autoSummarize ? ['自动', true] : ['手动', false]),
+  '剧情选项': (st) => (st.optionsEnabled ? [`${(st.optionSlots ?? []).length || st.optionCount || ''} 个`.trim(), true] : ['关', false]),
+  '八股删除器': (st) => (st.clicheEnabled ? ['开', true] : ['关', false]),
+  '自主推进': (st) => (st.autoAdvanceEnabled ? ['开', true] : ['关', false]),
+  'NPC': (st) => (st.autoNpcEnabled ? ['开', true] : ['关', false]),
+};
+
+// The current state on the right of each settings group, so it reads without opening.
+function syncGroupStates(root, settings) {
+  for (const group of root.querySelectorAll('.ssa-settings-group')) {
+    const summary = group.firstElementChild;
+    const label = summary?.querySelector('span')?.textContent?.trim();
+    const read = GROUP_STATE[label];
+    if (!read) continue;
+    const [text, on] = read(settings);
+    let badge = summary.querySelector('.ssa-group-state');
+    if (!badge) { badge = document.createElement('em'); badge.className = 'ssa-group-state'; badge.style.fontStyle = 'normal'; summary.append(badge); }
+    badge.textContent = text;
+    badge.dataset.on = String(on);
+  }
+}
+
 export function syncSettings(root, settings, apiKey = '') {
   applyHeroArt(root, settings);
   const heroUrl = root.querySelector('[data-role="hero-url"]');
@@ -1186,6 +1228,7 @@ export function syncSettings(root, settings, apiKey = '') {
     state.textContent = enabled ? '已开启' : '已关闭';
     state.dataset.state = enabled ? 'on' : 'off';
   }
+  syncGroupStates(root, settings);
   const optionsButton = root.querySelector('[data-action="generate-options"]');
   if (optionsButton) {
     optionsButton.disabled = !settings.optionsEnabled;
@@ -1210,13 +1253,59 @@ export function syncSettings(root, settings, apiKey = '') {
     input.checked = selectedExperiences.has(input.dataset.experienceId);
   }
   const limit = root.querySelector('[data-role="rollup-limit-value"]');
-  if (limit) limit.textContent = String(settings.rollupTokenLimit ?? 6000);
+  if (limit) limit.textContent = String(settings.rollupTokenLimit ?? 20000);
   const boundary = root.querySelector('[data-role="remote-floor-boundary"]');
   if (boundary) {
     const rawLimit = Number(settings.remoteRawFloorLimit) || 0;
     boundary.textContent = rawLimit > 0
       ? `滚动总摘要 + 最近 ${rawLimit} 楼原文`
       : '不发送历史楼层原文 · 批量摘要只发送本批楼层';
+  }
+}
+
+// Screen size for the panel and launcher (see the note in style.css). The
+// launcher's default spot is computed here too, and it is pulled back on
+// screen whenever the window or the on-screen keyboard changes the size.
+function watchViewport(root) {
+  const launcher = root.querySelector('.ssa-launcher');
+  const update = () => {
+    const width = window.innerWidth;
+    const height = window.visualViewport?.height ?? window.innerHeight;
+    root.style.setProperty('--ssa-vw', `${width}px`);
+    root.style.setProperty('--ssa-vh', `${height}px`);
+    const size = { width: launcher.offsetWidth || 34, height: launcher.offsetHeight || 34 };
+    const saved = readLauncherPosition();
+    const fallback = { left: width - size.width - (width <= 720 ? 8 : 20), top: height - size.height - (width <= 720 ? 68 : 82) };
+    applyLauncherPosition(launcher, clampLauncherPosition(saved ?? fallback, { width, height }, size));
+    if (root.classList.contains('is-open')) measureTopBar(root);
+  };
+  let frame = 0;
+  const schedule = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; update(); }); };
+  window.addEventListener('resize', schedule);
+  window.visualViewport?.addEventListener('resize', schedule);
+  window.addEventListener('orientationchange', schedule);
+  update();
+}
+
+// A second way in: an entry in SillyTavern's extensions (magic wand) menu,
+// for when the floating button is hidden or out of reach.
+function addExtensionsMenuEntry(root) {
+  const attach = () => {
+    const menu = document.querySelector('#extensionsMenu');
+    if (!menu) return false;
+    if (menu.querySelector('[data-ssa-menu]')) return true;
+    const item = document.createElement('div');
+    item.className = 'list-group-item flex-container flexGap5 interactable';
+    item.tabIndex = 0;
+    item.dataset.ssaMenu = '1';
+    item.innerHTML = '<span class="fa-solid fa-paw extensionsMenuExtensionButton"></span><span>喵喵数据库</span>';
+    item.addEventListener('click', () => { setOpen(root, true); switchTab(root, 'sending'); });
+    menu.append(item);
+    return true;
+  };
+  if (!attach()) {
+    const timer = setInterval(() => { if (attach()) clearInterval(timer); }, 1000);
+    setTimeout(() => clearInterval(timer), 30000);
   }
 }
 

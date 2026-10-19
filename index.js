@@ -1,19 +1,20 @@
-import { createSendHistory, normalizeFinalPrompt, pruneFinalPrompts } from './core/send-history.js?v=0.7.2';
-import { renderSendHistory } from './ui/send-view.js?v=0.7.2';
-import { createChatOptions } from './ui/chat-options.js?v=0.7.2';
-import { createClicheNotes } from './ui/cliche-note.js?v=0.7.2';
-import { buildOptionsInstruction, extractOptions, buildAdvanceInstruction, normalizeOptionCount, replaceOptionsBlock, optionRegexScripts, OPTION_REGEX_IDS, optionText, presetSlots, normalizeSlots, DEFAULT_OPTION_RULES, ADVANCE_MODULES, DEFAULT_ADVANCE_MODULES, STRENGTH } from './core/play-prompts.js?v=0.7.2';
-import { normalizeAdvanceState, planRound, recordRound, advanceWatch, normalizeNextPlan, lastReplyBefore, pickWays, planIsCurrent } from './core/advance-plan.js?v=0.7.2';
-import { renderPushCard } from './ui/push-card.js?v=0.7.2';
-import { renderHero } from './ui/hero.js?v=0.7.2';
-import { renderOptionSlots, readSlotEdit } from './ui/option-slots.js?v=0.7.2';
-import { compileRules, scanCliches, summarizeHits, cleanLocally, sentencesToRewrite, applyRewrites, textHash, splitOptionsBlock } from './core/cliche-filter.js?v=0.7.2';
-import { buildPrivacyPayload, fingerprintMessage, validSummaries, estimateTokens, truncateToTokenBudget, isControlMessage } from './core/privacy-payload.js?v=0.7.2';
-import { formatMemoryDatabase, applyNarrativeEdits } from './core/memory-database.js?v=0.7.2';
-import { renderMemoryDatabase, renderTablePages, collectMemoryEdit } from './ui/memory-view.js?v=0.7.2';
-import { renderOverview } from './ui/overview-view.js?v=0.7.2';
-import { renderPromptViewer, selectRecord, filterPromptRows } from './ui/prompt-view.js?v=0.7.2';
-import { openApiProfiles } from './core/api-profiles.js?v=0.7.2';
+import { createSendHistory, normalizeFinalPrompt, pruneFinalPrompts } from './core/send-history.js?v=0.7.3';
+import { renderSendHistory } from './ui/send-view.js?v=0.7.3';
+import { createChatOptions } from './ui/chat-options.js?v=0.7.3';
+import { createClicheNotes } from './ui/cliche-note.js?v=0.7.3';
+import { buildOptionsInstruction, extractOptions, buildAdvanceInstruction, normalizeOptionCount, replaceOptionsBlock, optionRegexScripts, OPTION_REGEX_IDS, optionText, presetSlots, normalizeSlots, DEFAULT_OPTION_RULES, ADVANCE_MODULES, DEFAULT_ADVANCE_MODULES, STRENGTH } from './core/play-prompts.js?v=0.7.3';
+import { normalizeAdvanceState, planRound, recordRound, advanceWatch, normalizeNextPlan, lastReplyBefore, pickWays, planIsCurrent } from './core/advance-plan.js?v=0.7.3';
+import { renderPushCard } from './ui/push-card.js?v=0.7.3';
+import { renderHero } from './ui/hero.js?v=0.7.3';
+import { storyOnly, mapStory, configureStorySegments } from './core/story-segments.js?v=0.7.3';
+import { renderOptionSlots, readSlotEdit } from './ui/option-slots.js?v=0.7.3';
+import { compileRules, scanCliches, summarizeHits, cleanLocally, sentencesToRewrite, applyRewrites, textHash, splitOptionsBlock } from './core/cliche-filter.js?v=0.7.3';
+import { buildPrivacyPayload, fingerprintMessage, validSummaries, estimateTokens, truncateToTokenBudget, isControlMessage } from './core/privacy-payload.js?v=0.7.3';
+import { formatMemoryDatabase, applyNarrativeEdits } from './core/memory-database.js?v=0.7.3';
+import { renderMemoryDatabase, renderTablePages, collectMemoryEdit } from './ui/memory-view.js?v=0.7.3';
+import { renderOverview } from './ui/overview-view.js?v=0.7.3';
+import { renderPromptViewer, selectRecord, filterPromptRows } from './ui/prompt-view.js?v=0.7.3';
+import { openApiProfiles } from './core/api-profiles.js?v=0.7.3';
 import {
   createProvider,
   listOpenAiCompatibleModels,
@@ -22,13 +23,13 @@ import {
   requestNpcProfile,
   requestPlayerPreferenceProfile,
   requestStoryOptions,
-} from './core/api-client.js?v=0.7.2';
-import { isPreferenceQuizComplete, scorePreferenceQuiz, STORY_EXPERIENCE_OPTIONS, describeTasteSettings } from './core/preference-quiz.js?v=0.7.2';
-import { openArchiveStorage } from './core/storage.js?v=0.7.2';
-import { SummaryEngine } from './core/summary-engine.js?v=0.7.2';
-import { SemanticRecallService, fitRecall, formatRecallPrompt } from './core/semantic-recall.js?v=0.7.2';
-import { keywordRecall, archiveNames } from './core/keyword-recall.js?v=0.7.2';
-import { createStoryRequest, injectStoryContext, STORY_PROMPT_ID, memoryBudgetFor } from './core/story-context.js?v=0.7.2';
+} from './core/api-client.js?v=0.7.3';
+import { isPreferenceQuizComplete, scorePreferenceQuiz, STORY_EXPERIENCE_OPTIONS, describeTasteSettings } from './core/preference-quiz.js?v=0.7.3';
+import { openArchiveStorage } from './core/storage.js?v=0.7.3';
+import { SummaryEngine } from './core/summary-engine.js?v=0.7.3';
+import { SemanticRecallService, fitRecall, formatRecallPrompt } from './core/semantic-recall.js?v=0.7.3';
+import { keywordRecall, archiveNames } from './core/keyword-recall.js?v=0.7.3';
+import { createStoryRequest, injectStoryContext, STORY_PROMPT_ID, memoryBudgetFor } from './core/story-context.js?v=0.7.3';
 import {
   createArchiveShell,
   collectNpcEdits,
@@ -46,7 +47,7 @@ import {
   setStatus,
   switchTab,
   syncSettings,
-} from './ui/view.js?v=0.7.2';
+} from './ui/view.js?v=0.7.3';
 
 const MODULE_ID = 'spring-story-archive';
 let apiProfiles = null;
@@ -65,7 +66,12 @@ const DEFAULT_SETTINGS = Object.freeze({
   summaryContextEnabled: true,
   filterArchivedFloors: true,
   summarySource: 'current',
-  rollupTokenLimit: 6000,
+  rollupTokenLimit: 20000,
+  rollupVersion: 2,
+  rollupFormat: '',
+  storyScope: 'auto',
+  recentRawFloors: 5,
+  storyExtraTags: '',
   remoteRawFloorLimit: 0,
   expandedFloorCount: 5,
   backfillBatchSize: 10,
@@ -99,7 +105,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   semanticRecallEnabled: false,
   // 'auto' (vector when an embedding interface is set, else keywords) | 'keyword' | 'vector' | 'off'.
   recallMode: 'auto',
-  // Ceiling, in tokens, for everything 春序 adds to a request.
+  // Ceiling, in tokens, for everything 喵喵 adds to a request.
   memoryTokenLimit: 20000,
   recallEmbeddingModel: '',
   recallTopK: 4,
@@ -137,6 +143,7 @@ let optionsRunning = false;
 let optionsPending = null;
 let receivedForPostTasks = false;
 let advancing = false;
+let hostGenerating = false;
 let focusLatestOnNextRender = false;
 let latestReadySignature = '';
 let modelFetchTimer = 0;
@@ -219,7 +226,7 @@ async function getPlayerPreferenceProfile(chatKey = engine?.chatKey) {
 
 function getContext() {
   const context = globalThis.SillyTavern?.getContext?.();
-  if (!context) throw new Error('春序档案无法连接 SillyTavern。');
+  if (!context) throw new Error('喵喵数据库无法连接 SillyTavern。');
   return context;
 }
 
@@ -242,9 +249,30 @@ function getSettings() {
   // Earlier versions stored a count and a writing style; turn them into the
   // editable categories once, keeping what the player had chosen.
   if (!Array.isArray(previous.optionSlots)) merged.optionSlots = presetSlots(merged.optionCount, merged.optionMode);
-  if (previous.optionRulesVersion !== 2) {
+  if (!(Number(previous.optionRulesVersion) >= 2)) {
     merged.optionWritingNotes = [DEFAULT_OPTION_RULES, String(previous.optionWritingNotes ?? '').trim()].filter(Boolean).join('\n');
     merged.optionRulesVersion = 2;
+  }
+  // The big-summary threshold used to default to 6,000; long RP replies fill
+  // that in a few floors. Move the old default up once; a custom value stays.
+  if (!(Number(previous.rollupVersion) >= 2)) {
+    if (previous.rollupTokenLimit === undefined || Number(previous.rollupTokenLimit) === 6000) merged.rollupTokenLimit = 20000;
+    merged.rollupVersion = 2;
+  }
+  configureStoryScope(merged);
+  // v3: the default rule names the player with {{user}} instead of 玩家, and
+  // repeated lines (left by an earlier migration that re-ran) collapse to one.
+  if (!(Number(previous.optionRulesVersion) >= 3)) {
+    const seen = new Set();
+    merged.optionWritingNotes = String(merged.optionWritingNotes ?? '')
+      .replace(/^不替玩家决定内心。$/gm, '不替{{user}}决定内心。')
+      .split('\n')
+      .filter((line) => { const key = line.trim(); if (!key) return true; if (seen.has(key)) return false; seen.add(key); return true; })
+      .join('\n');
+    if (Array.isArray(merged.optionSlots)) {
+      merged.optionSlots = merged.optionSlots.map((slot) => ({ ...slot, rule: String(slot.rule ?? '').replace(/写玩家角色/g, '写{{user}}') }));
+    }
+    merged.optionRulesVersion = 3;
   }
   merged.remoteRawFloorLimit = [0, 1, 3, 5].includes(Number(merged.remoteRawFloorLimit))
     ? Number(merged.remoteRawFloorLimit)
@@ -271,6 +299,14 @@ function getSettings() {
   for (const key of SOURCE_KEYS) merged[key] = organizeSource;
   context.extensionSettings[MODULE_ID] = merged;
   return merged;
+}
+
+let storyScopeKey = '';
+function configureStoryScope(settings) {
+  const key = `${settings.storyScope}|${settings.storyExtraTags}`;
+  if (key === storyScopeKey) return;
+  storyScopeKey = key;
+  configureStorySegments({ mode: settings.storyScope, extraTags: settings.storyExtraTags });
 }
 
 function saveSettings() {
@@ -346,13 +382,16 @@ function getExtraCredentials() {
   return { endpoint: profile?.endpoint ?? '', model: profile?.model ?? '', apiKey: profile?.apiKey ?? '' };
 }
 
-// Exact token counts when the host offers them; otherwise an estimate, labelled so.
+// The host tokenizer estimates message text; provider usage also counts message formatting.
 async function countTokens(text) {
   const context = getContext();
   if (typeof context.getTokenCountAsync === 'function') {
-    try { return { value: await context.getTokenCountAsync(text), exact: true }; } catch {}
+    try {
+      const value = await context.getTokenCountAsync(text);
+      if (Number.isFinite(value) && value >= 0) return { value, exact: false, source: 'host' };
+    } catch {}
   }
-  return { value: estimateTokens(text), exact: false };
+  return { value: estimateTokens(text), exact: false, source: 'fallback' };
 }
 
 function showRound() {
@@ -360,7 +399,7 @@ function showRound() {
   const { snapshot, sends } = roundInputs;
   const chat = getContext().chat;
   // The prompt carries cleaned replies, so floors are matched on that text.
-  const floorTexts = chat.map((message) => (message.is_user ? String(message.mes ?? '') : splitOptionsBlock(message.mes).story));
+  const floorTexts = chat.map((message) => (message.is_user ? String(message.mes ?? '') : storyOnly(message.mes)));
   renderPromptViewer(root, { records: sends ?? [], chat, floorTexts, database: snapshot.memory, countTokens });
 }
 
@@ -602,8 +641,8 @@ async function keywordRecallForCurrentContext({ type, phase = 'matched', note = 
   const snapshot = await engine.getSnapshot();
   if (!task.isCurrent()) return { indexedCount: 0, records: [], prompt: '' };
   const summaries = validSummaries(applyNarrativeEdits(snapshot.summaries, snapshot.memoryEdits, targetFloorIndex), context.chat);
-  const query = context.chat.slice(0, targetFloorIndex + 1).filter((message) => !message.is_system).slice(-2).map((message) => splitOptionsBlock(message.mes).story).join('\n');
-  const records = keywordRecall(summaries, { query, names: archiveNames(snapshot.memory), topK: settings.recallTopK, latestFloorIndex: targetFloorIndex });
+  const query = context.chat.slice(0, targetFloorIndex + 1).filter((message) => !message.is_system).slice(-2).map((message) => storyOnly(message.mes)).join('\n');
+  const records = keywordRecall(summaries, { query, names: archiveNames(snapshot.memory), topK: settings.recallTopK, latestFloorIndex: targetFloorIndex, recentFloorLimit: settings.recentRawFloors });
   recallState = { indexedCount: summaries.length, recalledFloors: records.map((record) => record.floorIndex), error: '', phase, mode: 'keyword', note };
   showRecallState();
   return { indexedCount: summaries.length, records, prompt: formatRecallPrompt(records) };
@@ -633,7 +672,7 @@ async function vectorRecallForCurrentContext({ force = false, phase = 'matched',
     targetFloorIndex,
     topK: settings.recallTopK,
     threshold: settings.recallThreshold,
-    recentRawFloorLimit: settings.remoteRawFloorLimit,
+    recentRawFloorLimit: settings.recentRawFloors,
     force,
   });
   if (!task.isCurrent()) return { indexedCount: 0, records: [], prompt: '' };
@@ -654,6 +693,8 @@ async function addSemanticRecall(payload) {
   queuePendingSummaries({ force: true });
   await engine.waitForIdle();
   if (!task.isCurrent()) throw new Error('聊天已变化，请重新执行。');
+  await engine.refreshRollup({ allowCompression: false });
+  if (!task.isCurrent()) throw new Error('聊天已变化，请重新执行。');
   const snapshot = await engine.getSnapshot();
   if (!task.isCurrent()) throw new Error('聊天已变化，请重新执行。');
   const latestPlot = getContext().chat.findLastIndex((message) => !message.is_system && !isControlMessage(message));
@@ -662,7 +703,7 @@ async function addSemanticRecall(payload) {
     throw new Error('最新剧情还没有成功入档，请先同步记忆；选项与推进将等待有效的剧情信息。');
   }
   payload = { ...payload, rollingSummary: truncateToTokenBudget(snapshot.rollup?.text ?? '', 2400),
-    currentMemory: formatMemoryDatabase(snapshot.memory, { budget: 1600, query: getContext().chat.slice(-5).map((message) => message.mes).join('\n') }) };
+    currentMemory: formatMemoryDatabase(snapshot.memory, { userName: getContext().name1, budget: 1600, query: getContext().chat.slice(-5).map((message) => message.mes).join('\n') }) };
   if (!recallOn()) return payload;
   try {
     const result = await recallForCurrentContext({ phase: 'feature' });
@@ -758,6 +799,7 @@ async function prepareArchivePrompt(chat, contextSize, abort, type, request) {
       enabled: settings.summaryContextEnabled,
       filter: settings.filterArchivedFloors && canGuard,
       memoryBudget,
+      recentRaw: settings.recentRawFloors,
       onPlan: (plan) => { storyPlan = plan; if (canGuard) request.plan(plan); request.recordPlan?.(plan, settings.filterArchivedFloors && canGuard); },
       isCurrent: () => currentChatKey() === chatKey && getSettings().summaryContextEnabled
         && getSettings().filterArchivedFloors === settings.filterArchivedFloors,
@@ -779,7 +821,9 @@ async function prepareArchivePrompt(chat, contextSize, abort, type, request) {
     showRecallState();
     const found = await recallForCurrentContext({ phase: 'preparing', type });
     // Skip floors the prompt already carries, then fit the rest into what is left of the budget.
-    const rows = context.chat.filter((message) => !message.is_system || Array.isArray(message.extra?.tool_invocations));
+    const includesTools = chat.some((message) => message.is_system && Array.isArray(message.extra?.tool_invocations));
+    const rows = context.chat.map((message, floorIndex) => ({ message, floorIndex }))
+      .filter(({ message }) => !message.is_system || (includesTools && Array.isArray(message.extra?.tool_invocations)));
     const skipFloors = new Set([...(storyPlan?.includedFloors ?? []), ...chat.map((item) => rows[item?.index]?.floorIndex).filter(Number.isInteger)]);
     const result = { ...found, ...fitRecall(found.records, { skipFloors, budget: Math.max(0, memoryBudget - (storyPlan?.usedTokens ?? 0)), estimate: estimateTokens }) };
     request.recordBudget?.({ limit: memoryBudget, story: storyPlan?.usedTokens ?? 0, recall: result.usedTokens, dropped: result.dropped });
@@ -898,15 +942,16 @@ function writeMessageText(index, text, { note } = {}) {
 function cleanReceivedReply(index) {
   const message = getContext().chat[index];
   if (!clicheActive(message) || getSettings().clicheMode !== 'auto' || clicheVersion(message)) return;
-  const { story, block } = splitOptionsBlock(message.mes);
-  const { text, removed } = cleanLocally(story, clicheRules());
+  const rules = clicheRules();
+  let removed = 0;
+  const text = mapStory(message.mes, (story) => { const result = cleanLocally(story, rules); removed += result.removed; return result.text; });
   if (!removed) return;
-  writeMessageText(index, `${text}${block}`, { note: { original: message.mes, removed, rewritten: 0 } });
+  writeMessageText(index, text, { note: { original: message.mes, removed, rewritten: 0 } });
 }
 
 function clicheSentencesFor(message) {
   if (!clicheActive(message) || getSettings().clicheMode !== 'auto' || clicheVersion(message)?.skip) return [];
-  return sentencesToRewrite(splitOptionsBlock(message.mes).story, clicheRules());
+  return sentencesToRewrite(storyOnly(message.mes), clicheRules());
 }
 
 // Rewrites from the organizing call go straight into the reply. The returned
@@ -914,11 +959,11 @@ function clicheSentencesFor(message) {
 async function applyFloorRewrites(index, rewrites) {
   const message = getContext().chat[index];
   if (!clicheActive(message) || getSettings().clicheMode !== 'auto' || clicheVersion(message)?.skip) return null;
-  const { story, block } = splitOptionsBlock(message.mes);
-  const { text, applied } = applyRewrites(story, rewrites);
+  let applied = 0;
+  const text = mapStory(message.mes, (story) => { const result = applyRewrites(story, rewrites); applied += result.applied; return result.text; });
   if (!applied) return null;
   const before = clicheVersion(message);
-  writeMessageText(index, `${text}${block}`, { note: { original: before?.original ?? message.mes, removed: before?.removed ?? 0, rewritten: (before?.rewritten ?? 0) + applied } });
+  writeMessageText(index, text, { note: { original: before?.original ?? message.mes, removed: before?.removed ?? 0, rewritten: (before?.rewritten ?? 0) + applied } });
   return fingerprintMessage(message, index);
 }
 
@@ -926,7 +971,7 @@ function describeReply(index) {
   const message = getContext().chat[index];
   if (!clicheActive(message)) return null;
   const rules = clicheRules();
-  const { story } = splitOptionsBlock(message.mes);
+  const story = storyOnly(message.mes);
   if (getSettings().clicheMode === 'mark') return { mode: 'mark', hits: summarizeHits(scanCliches(story, rules)) };
   const version = clicheVersion(message);
   if (version?.skip) return { mode: 'auto', skipped: true };
@@ -1672,7 +1717,7 @@ async function handleSettingChange(input) {
   const settings = getSettings();
   settings[key] = input.type === 'checkbox'
     ? input.checked
-    : ['memoryTokenLimit', 'optionCount', 'backfillBatchSize', 'rollupTokenLimit', 'remoteRawFloorLimit', 'advanceRounds', 'expandedFloorCount', 'recallTopK', 'recallThreshold', 'recallDepth', 'memoryUpdateEvery', 'memoryMinTokens'].includes(key)
+    : ['memoryTokenLimit', 'recentRawFloors', 'optionCount', 'backfillBatchSize', 'rollupTokenLimit', 'remoteRawFloorLimit', 'advanceRounds', 'expandedFloorCount', 'recallTopK', 'recallThreshold', 'recallDepth', 'memoryUpdateEvery', 'memoryMinTokens'].includes(key)
       ? Number(input.value)
       : input.value;
   if (key === 'autoAdvanceEnabled' && !settings.autoAdvanceEnabled) {
@@ -1823,7 +1868,7 @@ function bindUi() {
       return;
     }
     const field = event.target.dataset?.setting;
-    if (['optionWritingNotes', 'preferenceNotes', 'npcBrief', 'clicheCustomRules', 'summaryFormat', 'advanceEventPool'].includes(field)) {
+    if (['optionWritingNotes', 'preferenceNotes', 'npcBrief', 'clicheCustomRules', 'summaryFormat', 'advanceEventPool', 'rollupFormat', 'storyExtraTags'].includes(field)) {
       getSettings()[field] = event.target.value;
       saveSettings();
       return;
@@ -1866,12 +1911,17 @@ function bindHostEvents() {
     const task = captureChatTask();
     if (getSettings().autoSummarize) window.setTimeout(() => { if (task.isCurrent()) engine.enqueue(messageIndexFromEvent(messageId)); }, 100);
   });
+  // A swipe that starts a new reply is organized once the reply arrives
+  // (MESSAGE_RECEIVED); only a swipe back to an existing reply is organized here.
+  subscribe('GENERATION_STARTED', (type, options, dryRun) => { if (!dryRun && type !== 'quiet') hostGenerating = true; });
+  subscribe('GENERATION_STOPPED', () => { hostGenerating = false; });
+  subscribe('GENERATION_ENDED', () => { hostGenerating = false; });
   subscribe('MESSAGE_SWIPED', (messageId) => {
     clearStoryPrompt();
     requestLatestSummaryFocus();
     scheduleReconcile({ queueMissing: false });
     const task = captureChatTask();
-    if (getSettings().autoSummarize) window.setTimeout(() => { if (task.isCurrent()) engine.enqueue(messageIndexFromEvent(messageId)); }, 100);
+    if (getSettings().autoSummarize) window.setTimeout(() => { if (task.isCurrent() && !hostGenerating) engine.enqueue(messageIndexFromEvent(messageId)); }, 300);
   });
   subscribe('MESSAGE_DELETED', () => scheduleReconcile({ queueMissing: false }));
   subscribe('CHAT_CHANGED', () => {

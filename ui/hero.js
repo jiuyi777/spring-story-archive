@@ -38,7 +38,8 @@ export function renderHero(root, update = {}) {
   const title = root.querySelector('[data-role="hero-title"]');
   const sub = root.querySelector('[data-role="hero-sub"]');
   if (!kicker || !title || !sub) return;
-  kicker.textContent = state.chat ? `春序　${state.chat}` : '春序';
+  root.classList.toggle('is-page-compact', state.tab !== 'sending' && Boolean(PAGES[state.tab]));
+  kicker.textContent = state.chat ? `喵喵　${state.chat}` : '喵喵';
   title.replaceChildren();
   if (state.tab === 'sending' || !PAGES[state.tab]) {
     if (state.floor > 0) {

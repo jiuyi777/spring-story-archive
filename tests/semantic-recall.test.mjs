@@ -8,9 +8,12 @@ import {
   cosineSimilarity,
   embeddingsEndpointForChatEndpoint,
   formatRecallPrompt,
+  fitRecall,
   rankRecallMemories,
+  SemanticRecallService,
 } from '../core/semantic-recall.js';
 import { createMemoryStorage } from '../core/storage.js';
+import { keywordRecall } from '../core/keyword-recall.js';
 
 test('embedding endpoint is derived from chat completions and responses URLs', () => {
   assert.equal(embeddingsEndpointForChatEndpoint('https://example.test/v1/chat/completions'), 'https://example.test/v1/embeddings');
@@ -81,11 +84,54 @@ test('top semantic results are placed back in chronological order', () => {
   assert.deepEqual(ranked.map((row) => row.floorIndex), [2, 3]);
 });
 
-test('recall prompt makes later explicit statements current without erasing history', () => {
-  const prompt = formatRecallPrompt([{ floorIndex: 2, sourceText: '玩家当时拒绝进入庭院。' }]);
-  assert.match(prompt, /以楼层号更大的明确表态作为当前状态/);
-  assert.match(prompt, /旧表态仍是当时真实发生过的历史/);
-  assert.match(prompt, /不得把任何单次表态永久化/);
+test('recall uses speaker names and sends chronological facts without internal instructions', () => {
+  const prompt = formatRecallPrompt([
+    { floorIndex: 3, isUser: true, speakerName: '阿青', summary: '允许短暂追逐。' },
+    { floorIndex: 2, isUser: true, speakerName: '林青', summary: '当时拒绝进入庭院。', timeline: ['傍晚'] },
+  ]);
+  assert.equal(prompt, '【相关往事】\n\n【林青】当时拒绝进入庭院。\n时间线：傍晚\n\n【阿青】允许短暂追逐。');
+  assert.doesNotMatch(prompt, /玩家|第 \d+ 楼|永久命令|明确表态作为当前状态|历史摘要/);
+  assert.equal(buildRecallQuery([{ name: '林青', is_user: true, mes: '原文里的玩家不应被替换。' }], 0), '林青：原文里的玩家不应被替换。');
+  assert.equal(buildRecallDocument({ isUser: true, summary: '留下。' }), '【User】留下。');
+  assert.equal(buildRecallDocument({ summary: '天色渐暗。' }), '【旁白】天色渐暗。');
+});
+
+test('keyword recall renders latest summary facts and names rather than the cache envelope', () => {
+  const records = keywordRecall([
+    { floorIndex: 1, isUser: true, speakerName: '林青', summary: '林青把铜钥匙借给沈砚。', timeline: ['晚七点'] },
+  ], { query: '铜钥匙', names: ['铜钥匙'], latestFloorIndex: 20 });
+  assert.equal(formatRecallPrompt(records), '【相关往事】\n\n【林青】林青把铜钥匙借给沈砚。\n时间线：晚七点');
+  const prompt = formatRecallPrompt(records);
+  const fitted = fitRecall(records, { budget: prompt.length, estimate: text => text.length });
+  assert.equal(fitted.prompt, prompt);
+  assert.equal(fitted.usedTokens, prompt.length);
+  assert.equal(fitRecall(records, { budget: prompt.length - 1, estimate: text => text.length }).prompt, '');
+});
+
+test('existing vector cache gains named outgoing facts without reembedding', async () => {
+  const storage = createMemoryStorage();
+  const credentials = { endpoint: 'https://example.test/v1/chat/completions', embeddingModel: 'test-embedding', profileId: 'test' };
+  const sourceText = '第 2 楼 · 玩家明确表态\n摘要：林青把铜钥匙借给沈砚。\n时间线：晚七点';
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < sourceText.length; index += 1) hash = Math.imul(hash ^ sourceText.charCodeAt(index), 0x01000193);
+  const cache = { key: 'chat::vector::floor::1', chatKey: 'chat', floorIndex: 1, sourceText,
+    documentFingerprint: (hash >>> 0).toString(16).padStart(8, '0'), messageFingerprint: 'unchanged',
+    model: credentials.embeddingModel, endpoint: 'https://example.test/v1/embeddings', profileId: 'test', isUser: true, embedding: [1, 0] };
+  await storage.putVector(cache);
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('unexpected embedding request'); };
+  try {
+    const service = new SemanticRecallService({ storage, getCredentials: () => credentials });
+    const records = await service.sync('chat', [{ floorIndex: 1, status: 'ready', messageFingerprint: 'unchanged',
+      isUser: true, speakerName: '林青', summary: '林青把铜钥匙借给沈砚。', timeline: ['晚七点'] }]);
+    assert.equal(calls, 0);
+    assert.equal(formatRecallPrompt(records), '【相关往事】\n\n【林青】林青把铜钥匙借给沈砚。\n时间线：晚七点');
+    assert.deepEqual((await storage.listVectors('chat'))[0], cache);
+    assert.doesNotMatch(formatRecallPrompt([cache]), /第 2 楼|玩家明确表态|摘要：/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('memory storage can replace and clear vector rows by chat', async () => {

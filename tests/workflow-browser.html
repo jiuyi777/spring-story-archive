@@ -1,4 +1,4 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>春序 · 本地流程验证</title>
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>喵喵 · 本地流程验证</title>
 <link rel="stylesheet" href="../style.css">
 <style>:root{--topBarBlockSize:42px}body{margin:0;background:#f7f5ed;color:#203c30;font:16px/1.6 system-ui}html,body{scrollbar-width:none}::-webkit-scrollbar{display:none}.hostbar{height:42px;background:#2e463b;color:white;position:sticky;top:0;z-index:3005}#chat{padding:16px}.mes{padding:14px 0;border-bottom:1px solid #ccc}textarea{box-sizing:border-box;width:95%;margin:8px}button{padding:8px;margin:4px}#receipt{font-size:13px;padding:12px}</style>
 <body><div class="hostbar">本地模拟酒馆 · 不调用真实模型</div><button id="next">模拟下一轮回复</button><button id="swipe">模拟重新生成</button><button id="stop">模拟停止请求</button><p id="receipt">等待测试</p><div id="chat"></div><textarea id="send_textarea" aria-label="酒馆聊天输入框"></textarea>
@@ -24,7 +24,7 @@ if (new URLSearchParams(location.search).has('mobile')) {
    return JSON.stringify({floors:(payload.targetFloors||[]).map(({floor})=>({floor,summary:'林素在档案室核对登记簿。',changes:[{table:'scene',id:'current',values:{time:'雨夜',location:'旧宅档案室'}},{table:'characters',id:'林素',values:{name:'林素',location:'旧宅档案室',state:'核对登记簿'}},{table:'inventory',id:'登记簿',values:{name:'登记簿',owner:'林素',quantity:'1'}}]}))});
  }};
  globalThis.SillyTavern={getContext:()=>context};
- render(); await import('../index.js?v=0.7.2');
+ render(); await import('../index.js?v=0.7.3');
  const generate=async(type,stop=false)=>{
    document.querySelector('#receipt').textContent='正在模拟宿主生成流程';
    if(type!=='swipe'){chat.push({name:'玩家',is_user:true,mes:'请林素说明登记簿的改动。'});render();await emit('MESSAGE_SENT',chat.length-1);}

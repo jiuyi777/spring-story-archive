@@ -1,7 +1,7 @@
 // Decides what the push carries in one round. A concrete plan written by the
 // organizing call (or by the player) wins; otherwise one or two ways are picked
 // to fit the situation, skipping the ways used in the last couple of rounds.
-import { advanceLines, ADVANCE_MODULES } from './play-prompts.js?v=0.7.2';
+import { advanceLines, ADVANCE_MODULES } from './play-prompts.js?v=0.7.3';
 
 const HISTORY_LIMIT = 20;
 const TENSE = /打|杀|血|逃|追|爆炸|死|伤|危险|争吵|对峙|袭|威胁|崩溃|失控|围/;

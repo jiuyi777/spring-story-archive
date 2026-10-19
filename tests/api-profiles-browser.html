@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>春序档案 · API 配置交互验证</title>
+<title>喵喵数据库 · API 配置交互验证</title>
 <link rel="stylesheet" href="../style.css">
 <style>:root{--topBarBlockSize:42px}body{margin:0;background:#314d40}#receipt{position:fixed;bottom:4px;left:4px;color:white;font:12px system-ui;z-index:2147483647;pointer-events:none}html,body{scrollbar-width:none}::-webkit-scrollbar{display:none}</style>
 <div style="position:fixed;top:0;left:0;right:0;height:42px;background:#222;color:white;z-index:3005">模拟酒馆顶部工具栏</div><output id="receipt">本地模拟接口，不调用外部模型</output>
@@ -30,6 +30,6 @@
       try { const payload = JSON.parse(body.messages.at(-1).content); content = JSON.stringify({ floors: payload.targetFloors.map(({ floor }) => ({ floor, summary: '林素在图书馆找到登记簿。', changes: [{table:'scene',id:'current',values:{location:'图书馆',situation:'找到登记簿'}},{table:'characters',id:'林素',values:{name:'林素',state:'持有登记簿'}}] })) }); } catch {}
       return Response.json({ choices: [{ message: { content } }] });
     };
-    await import('../index.js?v=0.7.2');
+    await import('../index.js?v=0.7.3');
   }
 </script></html>

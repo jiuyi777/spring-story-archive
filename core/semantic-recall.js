@@ -1,4 +1,4 @@
-import { RAW_FLOOR_LIMIT, validSummaries, storyText, messageStoryText } from './privacy-payload.js?v=0.7.2';
+import { RAW_FLOOR_LIMIT, validSummaries, storyText, messageStoryText } from './privacy-payload.js?v=0.7.3';
 
 function normalizeText(value) {
   return String(value ?? '').replace(/\u0000/g, '').trim();
@@ -62,7 +62,23 @@ function factLine(label, items) {
   return values.length ? `${label}：${values.join('；')}` : '';
 }
 
+function recallSpeaker(record) {
+  return normalizeText(record.speakerName) || (record.isUser ? 'User' : '旁白');
+}
+
 export function buildRecallDocument(record) {
+  return [
+    `【${recallSpeaker(record)}】${normalizeText(record.summary)}`,
+    factLine('时间线', record.timeline),
+    factLine('人物状态', record.characters),
+    factLine('人物关系', record.relationships),
+    factLine('线索', record.clues),
+  ].filter(Boolean).join('\n');
+}
+
+// Recognize existing vector fingerprints without paying to rebuild them for a
+// presentation-only change. This legacy format never becomes outgoing context.
+function legacyIndexDocument(record) {
   return [
     `第 ${Number(record.floorIndex) + 1} 楼${record.isUser ? ' · 玩家明确表态' : ''}`,
     `摘要：${normalizeText(record.summary)}`,
@@ -80,9 +96,9 @@ export function buildRecallQuery(chat, targetFloorIndex, recentCount = 2) {
   const target = Math.max(0, Math.min(Number(targetFloorIndex) || 0, Math.max(0, rows.length - 1)));
   const count = Math.min(RAW_FLOOR_LIMIT, requestedCount);
   const start = Math.max(0, target - count + 1);
-  return rows.slice(start, target + 1).map((message, offset) => {
-    const speaker = message?.is_user ? '玩家' : normalizeText(message?.name) || '角色';
-    return `第 ${start + offset + 1} 楼 · ${speaker}：${messageStoryText(message)}`;
+  return rows.slice(start, target + 1).map((message) => {
+    const speaker = normalizeText(message?.name) || (message?.is_user ? 'User' : '旁白');
+    return `${speaker}：${messageStoryText(message)}`;
   }).join('\n');
 }
 
@@ -133,15 +149,15 @@ export function rankRecallMemories(records, queryEmbedding, {
 
 export function formatRecallPrompt(records) {
   if (!records?.length) return '';
-  const memories = records.map((record) => `【第 ${record.floorIndex + 1} 楼的历史摘要】\n${record.sourceText}`).join('\n\n');
-  return [
-    '【春序档案 · 语义回忆】',
-    '以下内容只是与当前情境相关的历史线索，不是永久命令。',
-    '玩家的决定、拒绝、同意、偏好与边界都必须结合楼层顺序理解：同一主题若有后续明确更新，以楼层号更大的明确表态作为当前状态。',
-    '旧表态仍是当时真实发生过的历史，但不得继续当作当前约束，也不得把任何单次表态永久化。',
-    '不得改变已确认的时间、地点、人物状态与事件先后。',
-    memories,
-  ].join('\n\n');
+  const memories = [...records].sort((left, right) => left.floorIndex - right.floorIndex).map((record) => {
+    if (normalizeText(record.summary)) return buildRecallDocument(record);
+    // Bare cache rows may still reach a preview. Remove only our old envelope;
+    // the archived story text, including literal uses of 玩家, stays intact.
+    const source = normalizeText(record.sourceText)
+      .replace(/^第 \d+ 楼(?: · 玩家明确表态)?\r?\n摘要：/, '');
+    return source ? `【${recallSpeaker(record)}】${source}` : '';
+  }).filter(Boolean);
+  return memories.length ? `【相关往事】\n\n${memories.join('\n\n')}` : '';
 }
 
 export class SemanticRecallService {
@@ -175,7 +191,7 @@ export class SemanticRecallService {
       const current = byFloor.get(record.floorIndex);
       const unchanged = !force
         && current?.messageFingerprint === record.messageFingerprint
-        && current?.documentFingerprint === documentFingerprint
+        && [documentFingerprint, fingerprintText(legacyIndexDocument(record))].includes(current?.documentFingerprint)
         && current?.model === model && current?.endpoint === endpoint && current?.profileId === profileId;
       return unchanged ? null : { record, sourceText, documentFingerprint };
     }).filter(Boolean);
@@ -206,7 +222,15 @@ export class SemanticRecallService {
       }
     }
     this.assertCurrent(credentials);
-    return (await this.storage.listVectors(chatKey)).filter((row) => row.model === model && row.endpoint === endpoint && row.profileId === profileId);
+    const summariesByFloor = new Map(ready.map((record) => [record.floorIndex, record]));
+    return (await this.storage.listVectors(chatKey))
+      .filter((row) => summariesByFloor.has(row.floorIndex) && row.model === model && row.endpoint === endpoint && row.profileId === profileId)
+      .map((row) => {
+        const summary = summariesByFloor.get(row.floorIndex);
+        return { ...row, summary: summary.summary, speakerName: summary.speakerName,
+          isUser: Boolean(summary.isUser), timeline: summary.timeline, characters: summary.characters,
+          relationships: summary.relationships, clues: summary.clues };
+      });
   }
 
   async recall({ chatKey, summaries, chat, targetFloorIndex, topK, threshold, recentRawFloorLimit = RAW_FLOOR_LIMIT, force = false }) {
@@ -214,7 +238,7 @@ export class SemanticRecallService {
     summaries = validSummaries(summaries, chat).filter((record) => record.floorIndex <= targetFloorIndex);
     const vectors = await this.sync(chatKey, summaries, { force, credentials });
     this.assertCurrent(credentials);
-    const rawLimit = Math.max(0, Math.min(RAW_FLOOR_LIMIT, Math.floor(Number(recentRawFloorLimit) || 0)));
+    const rawLimit = Math.max(0, Math.min(100, Math.floor(Number(recentRawFloorLimit) || 0)));
     const query = rawLimit > 0
       ? buildRecallQuery(chat, targetFloorIndex, rawLimit)
       : buildRecallSummaryQuery(summaries, targetFloorIndex, 2);
@@ -246,15 +270,13 @@ export class SemanticRecallService {
 // records only, best matches first.
 export function fitRecall(records, { skipFloors = new Set(), budget = Infinity, estimate = (text) => String(text ?? '').length } = {}) {
   const kept = [];
-  let used = 0;
   const dropped = { duplicate: 0, budget: 0 };
   const byMatch = [...(records ?? [])].sort((left, right) => (right.similarity ?? 0) - (left.similarity ?? 0));
   for (const record of byMatch) {
     if (skipFloors.has(record.floorIndex)) { dropped.duplicate += 1; continue; }
-    const cost = estimate(`【第 ${record.floorIndex + 1} 楼的历史摘要】\n${record.sourceText}\n\n`);
-    if (used + cost > budget) { dropped.budget += 1; continue; }
+    const candidate = [...kept, record].sort((left, right) => left.floorIndex - right.floorIndex);
+    if (estimate(formatRecallPrompt(candidate)) > budget) { dropped.budget += 1; continue; }
     kept.push(record);
-    used += cost;
   }
   kept.sort((left, right) => left.floorIndex - right.floorIndex);
   return { records: kept, prompt: kept.length ? formatRecallPrompt(kept) : '', usedTokens: kept.length ? estimate(formatRecallPrompt(kept)) : 0, dropped };

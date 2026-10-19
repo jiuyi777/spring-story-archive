@@ -54,6 +54,7 @@ import { createMemoryStorage } from '../core/storage.js';
 import { fingerprintMessage } from '../core/privacy-payload.js';
 
 import { textHash, splitOptionsBlock } from '../core/cliche-filter.js';
+import { storyOnly, mapStory } from '../core/story-segments.js';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
@@ -102,7 +103,7 @@ function replyHarness(chat) {
   const sandbox = {
     getSettings: () => ({ clicheEnabled: true, clicheMode: 'auto' }),
     getContext: () => ({ chat, saveChatDebounced() {} }),
-    clicheRules: () => rules, textHash, splitOptionsBlock, cleanLocally, applyRewrites, sentencesToRewrite,
+    clicheRules: () => rules, textHash, splitOptionsBlock, storyOnly, mapStory, cleanLocally, applyRewrites, sentencesToRewrite,
     fingerprintMessage, scheduleReconcile() {}, setStatus() {}, root: {}, clicheNotes: null,
   };
   vm.createContext(sandbox);

@@ -3,8 +3,8 @@ import {
   REMOTE_INPUT_TOKEN_LIMIT,
   splitInputText,
   truncateToTokenBudget,
-} from './privacy-payload.js?v=0.7.2';
-import { validateMemoryChanges, MEMORY_VERSION } from './memory-database.js?v=0.7.2';
+} from './privacy-payload.js?v=0.7.3';
+import { validateMemoryChanges, MEMORY_VERSION } from './memory-database.js?v=0.7.3';
 
 function stripCodeFence(value) {
   return String(value ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
@@ -118,6 +118,10 @@ export async function callOpenAiCompatible({ endpoint, apiKey, model, messages, 
     temperature: 0.25,
     max_tokens: maxTokens,
     stream: false,
+    // DeepSeek enables thinking by default, which can spend our entire short
+    // output allowance before emitting JSON. These background tasks need the
+    // result directly; keep this provider-specific field off other endpoints.
+    ...(new URL(chatCompletionsUrl(endpoint)).hostname === 'api.deepseek.com' ? { thinking: { type: 'disabled' } } : {}),
   };
   let response;
   try {
@@ -187,17 +191,60 @@ function payloadText(payload) {
   }, null, 2);
 }
 
+const MEMORY_LIST_FIELDS = new Set(['characters.aliases', 'tasks.participants', 'clues.people', 'clues.knownBy']);
+const MEMORY_VALUE_FORMAT = 'values 中的每个字段都必须是字符串：quantity 写成 "1"，多人或别名写成 "林青、沈砚"，不要使用数字、数组或对象。';
+const SUMMARY_LIST_FORMAT = 'characters、relationships、clues、timeline 均为字符串数组，每项写完整可读的事实，例如 characters:["沈砚：已归还铜钥匙"]；这些列表的元素不可使用对象、嵌套数组或数字。';
+const SCENE_UPDATE_RULES = '每楼单独核对实际时刻与所在地点。正文明确发生时间推进（如“现在八点到了”）时，必须在该楼 changes 更新 scene/current 的 time；实际抵达新地点或切换当前场景时，必须更新 scene/current 的 location，并更新实际移动人物的 characters.location。仅写在 summary 或 timeline 里不足以更新当前场景。按本批较早楼层已经产生的状态继续判断，避免重复回复掩盖前一楼漏写的时间地点变更。沿用明确的日期，时间不完整时保留原文确定的粒度，不补造日期。约定“今晚八点归还”只更新 tasks.deadline，不代表现在已到八点；计划“准备去东廊”不改变 scene.location 或人物location；远处背景介绍不等于当前场景切换。留在原地、没有实际移动的人物保持原位置。只输出实际变化的字段：只到点就只更新 time，只换场就更新 location 及移动人物位置；未变字段继续保留，每楼无需重抄整库。';
+const MEMORY_FIELD_AUTHORITY_RULES = '每项可变事实只在对应专用字段保存一份：物品的归属、持有者、数量和存放位置分别写入 inventory 的 owner、holder、quantity、place；约定期限与进度写入 tasks 的 deadline、state。characters.state 只写个人身体、情绪和正在做的事；scene.situation 只写现场局势与环境；inventory.state 只写物品本身的状况与用途。这些自由描述不重复物品归属、持有、数量、位置或约定期限与进度。带来源楼号的描述从该楼起持续有效，直到有明确更新；同一事实冲突时，以对应专用字段及较新楼层为准。同批按原楼号依次检查变更；交接、消耗或约定更新时，检查 currentMemory 及本批前面楼层是否把同一事实重复写进人物或场景描述。有明确依据表明旧描述已经过期时，只改写受影响的描述；若整段只是重复旧物品或约定事实，用空字符串明确清空该字段，保留其他个人状态。省略字段表示保留，不能用省略代替清空。';
+const PLAYER_MEMORY_RULES = '先逐楼检查玩家本人要求，再整理剧情状态。player 表单独整理玩家（speaker 为 player 的楼层）本人的持续信息：明确说出的长期喜欢、讨厌、雷点、跨轮有效的故事或写法要求，以及持续有效的重要决定。先按原话判断适用范围：“这次”“本条回复”“只简短写这次归还”等限定当前回复或当前动作的临时要求，只保留在该楼 summary，不写入常驻 player 表，也不据此推断长期偏好。同一发言混有持续偏好与临时要求时分别处理，例如“我偏好安静调查，不要安排追逐；只简短写这次归还”只把“偏好安静调查，不要安排追逐”写入 player，临时写法留在 summary；“以后回复都简短些”是跨轮要求，需要写入 player。包含上述持续信息时，即使没有剧情状态变化，也必须在该楼 changes 中返回 table="player" 的更新，仅写进 summary 不足以完成记录。按原意记录，不要美化、概括成性格或猜测没说出口的喜好；角色在剧情里的台词和动作不算玩家本人的话。玩家楼层里的扮演动作、角色台词及下一步行动打算照常整理为剧情，不据此推断玩家偏好；并非每个玩家楼层都需要 player 更新。同一主题沿用同一 id（用主题命名），优先使用 currentMemory 中已有的主题 id。玩家后来改口时更新 content，并把旧说法写进 previous；没有改口的旧条目保持有效，不因时间久远失效。没有新内容时不要改 player 表。格式示例（仅示范，不补入实际没有的要求）：玩家说“不要安排追逐，偏好安静调查”时，changes 包含 {"table":"player","id":"剧情节奏","values":{"topic":"剧情节奏","kind":"要求","content":"不要安排追逐，偏好安静调查","previous":""}}；同一玩家后来改为“允许短暂追逐，但不要长时间逃亡”时，沿用 id，返回 {"table":"player","id":"剧情节奏","values":{"topic":"剧情节奏","kind":"要求","content":"允许短暂追逐，但不要长时间逃亡","previous":"不要安排追逐，偏好安静调查"}}。';
+
+function normalizeModelMemoryChanges(changes) {
+  if (!Array.isArray(changes)) return changes;
+  return changes.map((change) => {
+    if (!change?.values || typeof change.values !== 'object' || Array.isArray(change.values)) return change;
+    // Adapt unambiguous model field shapes before the strict storage validator.
+    // Unknown fields and ambiguous values remain unchanged so validation rejects them.
+    const values = Object.fromEntries(Object.entries(change.values).map(([field, value]) => {
+      if (change.table === 'inventory' && field === 'quantity' && typeof value === 'number' && Number.isFinite(value)) {
+        return [field, String(value)];
+      }
+      if (MEMORY_LIST_FIELDS.has(`${change.table}.${field}`) && Array.isArray(value) && value.every((item) => typeof item === 'string')) {
+        return [field, value.join('、')];
+      }
+      return [field, value];
+    }));
+    return { ...change, values };
+  });
+}
+
+function normalizeSummaryList(value, field, limit = 12) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error(`摘要 ${field} 必须是字符串数组。`);
+  return value.map((item) => {
+    if (typeof item === 'string') return item.trim();
+    // DeepSeek returned this exact, unambiguous shape in real floor summaries.
+    // Preserve both fields without discarding unknown data or coercing objects.
+    if (field === 'characters' && item && !Array.isArray(item)
+        && typeof item.name === 'string' && item.name.trim()
+        && typeof item.state === 'string'
+        && Object.keys(item).every((key) => key === 'name' || key === 'state')) {
+      return [item.name.trim(), item.state.trim()].filter(Boolean).join('：');
+    }
+    throw new Error(`摘要 ${field} 包含无法确认含义的条目，请使用事实字符串。`);
+  }).filter(Boolean).slice(0, limit);
+}
+
 function normalizeFloorSummary(parsed, floor, structuredMemory = false) {
   const summary = String(parsed?.summary ?? '').trim();
   if (!summary) return null;
   return {
     floor,
     summary,
-    characters: Array.isArray(parsed.characters) ? parsed.characters.map(String).filter(Boolean).slice(0, 12) : [],
-    relationships: Array.isArray(parsed.relationships) ? parsed.relationships.map(String).filter(Boolean).slice(0, 12) : [],
-    clues: Array.isArray(parsed.clues) ? parsed.clues.map(String).filter(Boolean).slice(0, 12) : [],
-    timeline: Array.isArray(parsed.timeline) ? parsed.timeline.map(String).filter(Boolean).slice(0, 12) : [],
-    ...(structuredMemory ? { memoryVersion: MEMORY_VERSION, memoryChanges: validateMemoryChanges(parsed.changes) } : {}),
+    characters: normalizeSummaryList(parsed.characters, 'characters'),
+    relationships: normalizeSummaryList(parsed.relationships, 'relationships'),
+    clues: normalizeSummaryList(parsed.clues, 'clues'),
+    timeline: normalizeSummaryList(parsed.timeline, 'timeline'),
+    ...(structuredMemory ? { memoryVersion: MEMORY_VERSION, memoryChanges: validateMemoryChanges(normalizeModelMemoryChanges(parsed.changes)) } : {}),
     ...(Array.isArray(parsed?.rewrites) && parsed.rewrites.length
       ? { rewrites: parsed.rewrites.filter((item) => typeof item?.from === 'string' && typeof item?.to === 'string').slice(0, 12).map(({ from, to }) => ({ from, to })) }
       : {}),
@@ -221,7 +268,7 @@ function npcWatchInstruction(watch) {
 }
 
 // Planning the next round's push rides in the same organizing call.
-const NEXT_PLAN_RULES = '要求：ways 只能从 advanceWatch.ways 里挑 1 到 2 个 id；plan 写具体：谁、做什么、发生什么事，一两句话，不写成正文；接着 recentPushes 往下发展，不重复催同一件事，换一个角度或推进到下一步；有 mainGoal 时朝它慢慢靠近，但不要一步到位；刚经历紧张段落就安排喘息；符合 strength 和 tastes；只能依据已经发生的剧情，不跳时、不瞬移、不改变已有关系的事实；用了 eventPool 里的事件时把原文抄进 event，否则 event 留空。';
+const NEXT_PLAN_RULES = '要求：plan 里用 speakerName 的名字称呼人物，不写“玩家”“用户”“第几楼”；ways 只能从 advanceWatch.ways 里挑 1 到 2 个 id；plan 写具体：谁、做什么、发生什么事，一两句话，不写成正文；接着 recentPushes 往下发展，不重复催同一件事，换一个角度或推进到下一步；有 mainGoal 时朝它慢慢靠近，但不要一步到位；刚经历紧张段落就安排喘息；符合 strength 和 tastes；只能依据已经发生的剧情，不跳时、不瞬移、不改变已有关系的事实；用了 eventPool 里的事件时把原文抄进 event，否则 event 留空。';
 
 function advanceInstruction(watch) {
   if (!watch) return '';
@@ -257,11 +304,12 @@ export async function requestFloorSummaries(provider, payload) {
     messages: [
       {
         role: 'system',
-        content: `你维护长篇剧情记忆数据库。按原楼号处理 ${expectedFloors.join('、')} 楼。${payload.summaryFormat ? `summary 按玩家指定的格式写（summaryFormat）：${payload.summaryFormat}。格式里没提到的内容不要硬凑。` : 'summary 直接写谁在何时何地做了什么、产生什么结果；一两句够用就停止，不设最低字数。'}记录真实剧情事实，略过关于楼层、写作过程、用户指令、是否展开剧情的解说。时间地点不明就省略，数组无事实就留空。准确保留玩家 user 的原话含义及楼层顺序；不得用角色回复稀释或改写玩家意图。同一主题以更晚楼层的明确更新为当前状态，旧决定、拒绝、同意、偏好或边界只保留为当时发生过的历史，不得把角色的单次表态永久化；玩家本人明确说出的喜好和要求见 player 表规则。区分已发生、当前状态与计划，不补写剧情。只输出 JSON：{"floors":[{"floor":楼号,"summary":"精简事实","characters":[],"relationships":[],"clues":[],"timeline":[]${structuredMemory ? ',"changes":[{"table":"characters","id":"人物姓名","values":{"name":"人物姓名","state":"本楼明确的新状态"}}]' : ''}}]}。每楼分别返回，空数组仍保留。${structuredMemory ? '同时用 changes 增量更新 memorySchema 中的表格。currentMemory 仅作身份与已有状态参考，每条变更须有本楼原文的明确依据。人物按姓名、新物品和技能按首次拥有者/名称建立 id，关系按两端人物、任务与线索按名称建立 id；同一实体沿用已有 id。物品转交后沿用原 id：借出、交给他人保管或被拿走只更新 holder 与 place；只有赠与、买卖、继承等明确的所有权转移才更新 owner。holder 同时只能有一人；消耗、转交、归还必须在本楼实际发生，角色口头声称（如“我已经还了”）、计划与猜测都不改变归属或数量。scene 的 id 固定为 current。只填写本楼发生变化且有依据的字段；未变的旧字段由程序保留。资源消耗写剩余数量，任务完成写完成状态。没有状态变化时 changes=[]。人物别名须有明确指代依据；同名身份不明时保持分开。knowledge 只记该人物明确知晓的信息，秘密与推测注明范围，不能当作所有人都知道。未经证实的说法、猜测、传闻和计划不写进人物、物品、任务的当前状态；需要保留时写入 clues，basis 注明“某人说法”“猜测”或“计划”，knownBy 写明谁知道。tasks 记录任务与约定，participants 写参与者，deadline 写期限，完成或取消时把 state 改为“已完成”“已取消”。relationships 变化时在 cause 写原因。skills 受伤、封印、冷却等导致暂时无法使用时更新 available。事件表由程序从 summary 自动生成。player 表单独整理玩家（speaker 为 player 的楼层）本人的话：明确说出的喜欢、讨厌、雷点、对故事或写法的要求，以及做出的重要决定。按原意记录，不要美化、概括成性格或猜测没说出口的喜好；角色在剧情里的台词和动作不算玩家本人的话。同一主题沿用同一 id（用主题命名）。玩家后来改口时更新 content，并把旧说法写进 previous；没有改口的旧条目保持有效，不因时间久远失效。没有新内容时不要改 player 表。' : ''}${npcWatchInstruction(payload.npcWatch)}${clicheInstruction(payload.clicheRewrite)}${advanceInstruction(payload.advanceWatch)}`,
+        content: `你维护长篇剧情记忆数据库。按原楼号处理 ${expectedFloors.join('、')} 楼。${structuredMemory ? PLAYER_MEMORY_RULES + SCENE_UPDATE_RULES : ''}${payload.summaryFormat ? `summary 按玩家指定的格式写（summaryFormat）：${payload.summaryFormat}。格式里没提到的内容不要硬凑。` : 'summary 直接写谁在何时何地做了什么、产生什么结果；一两句够用就停止，不设最低字数。'}记录真实剧情事实与玩家明确表达的原意，略过“本楼未展开”等过程解说。仅“继续”“接着写”等无实质内容的纯控制命令可忽略；带有偏好或写法要求的玩家发言需要记录。时间地点不明就省略，数组无事实就留空。准确保留玩家 user 的原话含义及楼层顺序；不得用角色回复稀释或改写玩家意图。同一主题以更晚楼层的明确更新为当前状态，旧决定、拒绝、同意、偏好或边界只保留为当时发生过的历史，不得把角色的单次表态永久化；玩家本人持续偏好与跨轮要求见 player 表规则，临时要求按该楼适用范围记入摘要。区分已发生、当前状态与计划，不补写剧情。只输出 JSON：{"floors":[{"floor":楼号,"summary":"精简事实","characters":[],"relationships":[],"clues":[],"timeline":[]${structuredMemory ? ',"changes":[{"table":"characters","id":"人物姓名","values":{"name":"人物姓名","state":"本楼明确的新状态"}}]' : ''}}]}。每楼分别返回，空数组仍保留。${SUMMARY_LIST_FORMAT}${structuredMemory ? '同时用 changes 增量更新 memorySchema 中的表格。' + MEMORY_VALUE_FORMAT + MEMORY_FIELD_AUTHORITY_RULES + 'currentMemory 仅作身份与已有状态参考，每条变更须有本楼原文的明确依据。人物按姓名、新物品和技能按首次拥有者/名称建立 id，关系按两端人物、任务与线索按名称建立 id；同一实体沿用已有 id。物品转交后沿用原 id；在 inventory 中，借出、交给他人保管或被拿走只更新 holder 与 place；只有赠与、买卖、继承等明确的所有权转移才更新 owner。holder 同时只能有一人；消耗、转交、归还必须在本楼实际发生，角色口头声称（如“我已经还了”）、计划与猜测都不改变归属或数量。scene 的 id 固定为 current。只填写本楼发生变化且有依据的字段；未变的旧字段由程序保留。资源消耗写剩余数量，任务完成写完成状态。既无剧情状态变化，也无玩家持续偏好、跨轮要求或持续决定更新时，changes=[]。人物别名须有明确指代依据；同名身份不明时保持分开。knowledge 只记该人物明确知晓的信息，秘密与推测注明范围，不能当作所有人都知道。未经证实的说法、猜测、传闻和计划不写进人物、物品、任务的当前状态；需要保留时写入 clues，basis 注明“某人说法”“猜测”或“计划”，knownBy 写明谁知道。tasks 记录任务与约定，participants 写参与者，deadline 写期限，完成或取消时把 state 改为“已完成”“已取消”。relationships 变化时在 cause 写原因。skills 受伤、封印、冷却等导致暂时无法使用时更新 available。事件表由程序从 summary 自动生成。' : ''}${npcWatchInstruction(payload.npcWatch)}${clicheInstruction(payload.clicheRewrite)}${advanceInstruction(payload.advanceWatch)}`,
       },
       { role: 'user', content: input },
     ],
   };
+  request.messages[0].content += '\n叙事内容直接使用 speakerName 中的姓名；“player”和“character”仅为输入角色标识。summary 与各事实数组只写人物、行动、时间、地点、结果及明确要求，保留引用原话；正文不写“玩家”“第几楼”“本楼未展开”“专表优先”等整理过程说明。';
   const read = (raw) => {
   const parsed = parseJsonEnvelope(raw);
   const rows = Array.isArray(parsed?.floors) ? parsed.floors : Array.isArray(parsed) ? parsed : expectedFloors.length === 1 && parsed?.summary ? [{ ...parsed, floor: parsed.floor ?? expectedFloors[0] }] : [];
@@ -287,7 +335,7 @@ export async function requestFloorSummaries(provider, payload) {
     if (!structuredMemory) throw error;
     // One bounded retry from the original input; never treat prose as verified table data.
     const repaired = await provider({ ...request, messages: [
-      { ...request.messages[0], content: request.messages[0].content + '\n上一响应未通过结构校验。直接返回完整 JSON 对象，floors 中每楼必须包含 summary 和 changes 数组；保持字符串闭合，省去解释与代码围栏。' },
+      { ...request.messages[0], content: request.messages[0].content + '\n上一响应未通过结构校验。直接返回完整 JSON 对象，floors 中每楼必须包含 summary 和 changes 数组；保持字符串闭合，省去解释与代码围栏。' + MEMORY_VALUE_FORMAT + SUMMARY_LIST_FORMAT },
       request.messages[1],
     ] });
     try { return read(repaired); }
@@ -309,14 +357,14 @@ export async function requestFloorSummary(provider, payload) {
   return summary;
 }
 
-export async function requestCompression(provider, rollingText, throughFloor) {
+export async function requestCompression(provider, rollingText, throughFloor, { format = '' } = {}) {
   const serialize = (text) => JSON.stringify({ throughFloor, rollingSummary: text, rawFloors: [] }, null, 2);
   let text = rollingText;
   for (let round = 0; round < 4; round += 1) {
     const parts = splitInputText(text, serialize, REMOTE_INPUT_TOKEN_LIMIT - 300);
-    if (parts.length <= 1) return requestCompressionPart(provider, text, throughFloor);
+    if (parts.length <= 1) return requestCompressionPart(provider, text, throughFloor, format);
     const results = [];
-    for (const part of parts) results.push(await requestCompressionPart(provider, part, throughFloor));
+    for (const part of parts) results.push(await requestCompressionPart(provider, part, throughFloor, format));
     const next = results.map((result, index) => `【按时间顺序的分段档案 ${index + 1}】\n${JSON.stringify(result)}`).join('\n\n');
     if (estimateTokens(next) >= estimateTokens(text)) throw new Error('分段压缩没有缩短档案，已保留原摘要，请调整模型后重试。');
     text = next;
@@ -324,13 +372,14 @@ export async function requestCompression(provider, rollingText, throughFloor) {
   throw new Error('总摘要仍超过完整读取预算，已保留逐楼摘要。');
 }
 
-async function requestCompressionPart(provider, rollingText, throughFloor) {
+async function requestCompressionPart(provider, rollingText, throughFloor, format = '') {
+  const custom = String(format ?? '').trim().slice(0, 800);
   const raw = await provider({
-    maxTokens: 1200,
+    maxTokens: 4000,
     messages: [
       {
         role: 'system',
-        content: '你是长篇剧情总档案员。把给出的既有档案压缩为一份可供后续续写使用的总档案。玩家原话必须准确保留并附带楼层顺序。同一主题出现后续明确更新时，以更晚楼层作为当前状态；旧决定、拒绝、同意、偏好或边界只保留为当时发生过的历史，不继续当作当前约束，不得把任何单次表态永久化。时间线顺序以楼层编号为准，不得改变事件先后、地点、已知人物关系或事件状态。可以合并重复信息，不得添加原档案中不存在的信息。只输出 JSON：{"summary":"压缩后的总摘要","timeline":["按时间顺序保留的事件锚点"],"characters":["人物当前状态"],"relationships":["已确认的人物关系"],"clues":["未解决线索"],"continuityRules":["后续续写不得违反的已知事实"]}。',
+        content: '你是长篇剧情总档案员。把给出的既有档案压缩为一份可供后续续写使用的总档案。保留各段已有姓名与身份，分别记录不同人物和历史发言者；原话含义与引用原文保持准确。按输入档案的排列顺序理解事件先后；同一主题出现后续明确更新时，以后面的更新作为当前状态，旧决定、拒绝、同意、偏好或边界只保留为当时发生过的历史，不继续当作当前约束，不得把任何单次表态永久化。保留事件先后、地点、已知人物关系或事件状态。正文直接用已有姓名叙述事实与明确要求，保留引用原文和剧情中真实存在的游戏玩家等称谓；不把有姓名的发言者改称“玩家”，不添加“第几楼”“本楼未展开”“专表优先”等整理过程说明。可以合并重复信息，不得添加原档案中不存在的信息。只输出 JSON：{"summary":"压缩后的总摘要","timeline":["按时间顺序保留的事件锚点"],"characters":["人物当前状态"],"relationships":["已确认的人物关系"],"clues":["未解决线索"],"continuityRules":["后续续写不得违反的已知事实"]}。' + SUMMARY_LIST_FORMAT + (custom ? `summary 字段按指定的格式写（格式只管 summary，其他字段照常）：${custom}。格式里没提到的内容不要硬凑，也不要因为格式丢掉重要事实。` : ''),
       },
       { role: 'user', content: JSON.stringify({ throughFloor, rollingSummary: rollingText, rawFloors: [] }, null, 2) },
     ],
@@ -340,12 +389,60 @@ async function requestCompressionPart(provider, rollingText, throughFloor) {
   if (!summary) throw new Error('模型返回的大总结为空。');
   return {
     summary,
-    timeline: Array.isArray(parsed.timeline) ? parsed.timeline.map(String).filter(Boolean).slice(0, 80) : [],
-    characters: Array.isArray(parsed.characters) ? parsed.characters.map(String).filter(Boolean).slice(0, 40) : [],
-    relationships: Array.isArray(parsed.relationships) ? parsed.relationships.map(String).filter(Boolean).slice(0, 40) : [],
-    clues: Array.isArray(parsed.clues) ? parsed.clues.map(String).filter(Boolean).slice(0, 40) : [],
-    continuityRules: Array.isArray(parsed.continuityRules) ? parsed.continuityRules.map(String).filter(Boolean).slice(0, 40) : [],
+    timeline: normalizeSummaryList(parsed.timeline, 'timeline', 80),
+    characters: normalizeSummaryList(parsed.characters, 'characters', 40),
+    relationships: normalizeSummaryList(parsed.relationships, 'relationships', 40),
+    clues: normalizeSummaryList(parsed.clues, 'clues', 40),
+    continuityRules: normalizeSummaryList(parsed.continuityRules, 'continuityRules', 40),
   };
+}
+
+// One chapter (or a volume of merged chapters) of the big summary. A chapter
+// is written from the floor summaries of one stretch of story and is not
+// rewritten later, so it should keep the detail a reader would need.
+const CHAPTER_RULES = '保留各段已有姓名与身份，原话含义与引用原文保持准确；按输入顺序理解事件先后，同一主题后面的明确更新是当前状态，旧表态只是当时发生过的历史，不得永久化。正文直接用已有姓名叙述，不把有姓名的人改称“玩家”，不写“第几楼”“本楼”等整理过程说明。不得添加输入里没有的信息。';
+
+async function requestChapterPart(provider, text, { format = '', kind = 'chapter', previous = '' } = {}) {
+  const custom = String(format ?? '').trim().slice(0, 800);
+  const volume = kind === 'volume';
+  const raw = await provider({
+    maxTokens: 6000,
+    messages: [
+      {
+        role: 'system',
+        content: `你是长篇角色扮演的剧情总档案员。${volume ? '把输入里按时间排好的几章合并成一卷：保留每章的主要事件、转折和关键原话，只合并重复内容，不要缩成几句概括。' : '把输入里这一段剧情的逐楼小结写成一章总结。这一章以后不会再改写，所以要写得足够完整：按时间顺序写清每个重要事件、谁做了什么、为什么、结果如何；人物之间关系和态度的变化；对后续有影响的决定、约定和代价。宁可详细，不要只写几句概括，篇幅大约是输入的五分之一到八分之一。'}${CHAPTER_RULES}${previous ? '前情只用来衔接，不要重复写进本章。' : ''}只输出 JSON：{"title":"本${volume ? '卷' : '章'}标题，八个字以内","synopsis":"一两句话的简介","summary":"${volume ? '本卷' : '本章'}正文","turningPoints":["关键转折"],"keyQuotes":["人物名：“必须保留的原话”"],"timeline":["按时间顺序的事件锚点"],"characters":["人物在${volume ? '本卷' : '本章'}结束时的状态和变化"],"relationships":["关系变化及原因"],"clues":["埋下或尚未解决的伏笔"],"continuityRules":["后续续写不得违反的已知事实"]}。${SUMMARY_LIST_FORMAT}${custom ? `summary 字段按指定的格式写（格式只管 summary，其他字段照常）：${custom}。格式里没提到的内容不要硬凑，也不要因为格式丢掉重要事实。` : ''}`,
+      },
+      { role: 'user', content: JSON.stringify({ ...(previous ? { previousChapter: previous } : {}), source: text }, null, 2) },
+    ],
+  });
+  const parsed = parseJsonEnvelope(raw);
+  const summary = String(parsed.summary ?? '').trim();
+  if (!summary) throw new Error(`模型返回的${volume ? '卷' : '章'}总结为空。`);
+  return {
+    title: String(parsed.title ?? '').trim().slice(0, 20),
+    synopsis: String(parsed.synopsis ?? '').trim().slice(0, 300),
+    summary,
+    turningPoints: normalizeSummaryList(parsed.turningPoints, 'turningPoints', 40),
+    keyQuotes: normalizeSummaryList(parsed.keyQuotes, 'keyQuotes', 40),
+    timeline: normalizeSummaryList(parsed.timeline, 'timeline', 80),
+    characters: normalizeSummaryList(parsed.characters, 'characters', 40),
+    relationships: normalizeSummaryList(parsed.relationships, 'relationships', 40),
+    clues: normalizeSummaryList(parsed.clues, 'clues', 40),
+    continuityRules: normalizeSummaryList(parsed.continuityRules, 'continuityRules', 40),
+  };
+}
+
+// A stretch too long for one request is written as several chapter parts in
+// order and then merged into one, so every character of the source is read.
+export async function requestChapter(provider, text, { format = '', kind = 'chapter', previous = '' } = {}) {
+  const limit = REMOTE_INPUT_TOKEN_LIMIT - 4000;
+  const serialize = (part) => JSON.stringify({ previousChapter: previous, source: part }, null, 2);
+  const parts = splitInputText(text, serialize, limit);
+  if (parts.length <= 1) return requestChapterPart(provider, text, { format, kind, previous });
+  const pieces = [];
+  for (const part of parts) pieces.push(await requestChapterPart(provider, part, { format, kind: 'chapter', previous }));
+  const merged = pieces.map((piece, index) => `【第 ${index + 1} 段】${piece.summary}${piece.keyQuotes.length ? `\n原话：${piece.keyQuotes.join('；')}` : ''}${piece.turningPoints.length ? `\n转折：${piece.turningPoints.join('；')}` : ''}`).join('\n\n');
+  return requestChapterPart(provider, merged, { format, kind: 'volume', previous });
 }
 
 export const MODE_LABELS = {

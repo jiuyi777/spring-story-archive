@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "id": "spring-story-archive",
-  "displayName": "春序档案",
+  "displayName": "喵喵数据库",
   "author": "凡人歌 × 奶龙",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "minimumClientVersion": "1.14.0",
   "loadingOrder": 120,
   "withCss": true,

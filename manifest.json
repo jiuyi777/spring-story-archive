@@ -1,10 +1,10 @@
 {
-  "display_name": "春序档案",
+  "display_name": "喵喵数据库",
   "loading_order": 120,
   "js": "index.js",
   "css": "style.css",
   "author": "凡人歌 × 奶龙",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "minimum_client_version": "1.14.0",
   "generate_interceptor": "springStoryArchiveSemanticRecallInterceptor",
   "auto_update": false

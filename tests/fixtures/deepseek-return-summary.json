@@ -1,0 +1,261 @@
+{
+  "source": "DeepSeek isolated-host capture, 2026-10-15; fictional floors 6 and 7",
+  "targetFloors": [
+    {
+      "floor": 6,
+      "speaker": "player",
+      "kind": "user",
+      "importance": "player-statement",
+      "text": "我的剧情写法要求：偏好安静调查，不要安排追逐。现在八点到了，沈砚实际取出借来的铜钥匙交回林青掌心，林青收进腰包，二人确认归还约定完成。只简短写这次归还。"
+    },
+    {
+      "floor": 7,
+      "speaker": "DeepSeek隔离测试",
+      "kind": "assistant",
+      "importance": "normal",
+      "text": "八点到了，沈砚取出铜钥匙，交回林青掌心。林青收进腰包，二人确认归还完成。"
+    }
+  ],
+  "reply": {
+    "floors": [
+      {
+        "floor": 6,
+        "summary": "玩家提出剧情写法要求：偏好安静调查，不要安排追逐；并设定八点沈砚实际将借来的铜钥匙交回林青掌心，林青收进腰包，二人确认归还约定完成；要求只简短写这次归还。",
+        "characters": [
+          {
+            "name": "沈砚",
+            "state": "已把借来的铜钥匙交回林青，归还完成"
+          },
+          {
+            "name": "林青",
+            "state": "已从沈砚处收回铜钥匙并收进腰包"
+          }
+        ],
+        "relationships": [],
+        "clues": [],
+        "timeline": [
+          "10月15日晚八点，沈砚将铜钥匙交还林青，归还约定完成"
+        ],
+        "changes": [
+          {
+            "table": "player",
+            "id": "剧情节奏",
+            "values": {
+              "topic": "剧情节奏",
+              "kind": "要求",
+              "content": "偏好安静调查，不要安排追逐",
+              "previous": ""
+            }
+          },
+          {
+            "table": "inventory",
+            "id": "铜钥匙",
+            "values": {
+              "name": "铜钥匙",
+              "owner": "林青",
+              "holder": "林青",
+              "quantity": "1",
+              "state": "借出后已归还",
+              "place": "林青的腰包"
+            }
+          },
+          {
+            "table": "tasks",
+            "id": "归还铜钥匙",
+            "values": {
+              "name": "归还铜钥匙",
+              "owner": "沈砚",
+              "participants": "林青、沈砚",
+              "deadline": "今晚八点",
+              "state": "已完成",
+              "next": ""
+            }
+          },
+          {
+            "table": "characters",
+            "id": "沈砚",
+            "values": {
+              "name": "沈砚",
+              "state": "已把借来的铜钥匙交回林青，归还完成"
+            }
+          },
+          {
+            "table": "characters",
+            "id": "林青",
+            "values": {
+              "name": "林青",
+              "state": "已从沈砚处收回铜钥匙并收进腰包"
+            }
+          }
+        ]
+      },
+      {
+        "floor": 7,
+        "summary": "八点到了，沈砚取出铜钥匙交回林青掌心，林青收进腰包，二人确认归还完成。",
+        "characters": [
+          {
+            "name": "沈砚",
+            "state": "已归还铜钥匙"
+          },
+          {
+            "name": "林青",
+            "state": "已收回铜钥匙并收进腰包"
+          }
+        ],
+        "relationships": [],
+        "clues": [],
+        "timeline": [
+          "八点，沈砚归还铜钥匙，林青收进腰包"
+        ],
+        "changes": []
+      }
+    ]
+  },
+  "chat": [
+    {
+      "name": "DeepSeek隔离测试",
+      "is_user": false,
+      "mes": "10月15日傍晚，林青与沈砚在旧书房。林青有一把铜钥匙，放在自己的腰包中。"
+    },
+    {
+      "name": "测试员",
+      "is_user": true,
+      "mes": "林青从腰包取出铜钥匙，实际交到沈砚手里，只借给他开门，并约定今晚八点归还。简短写出这次交接。"
+    },
+    {
+      "name": "DeepSeek隔离测试",
+      "is_user": false,
+      "mes": "林青取出铜钥匙，交到沈砚手里，约定今晚八点归还。"
+    },
+    {
+      "name": "测试员",
+      "is_user": true,
+      "mes": "不要发生新的交接。只告诉我：铜钥匙归谁所有，现在在谁手上，约定几点归还？"
+    },
+    {
+      "name": "DeepSeek隔离测试",
+      "is_user": false,
+      "mes": "铜钥匙归林青所有，现在在沈砚手上，约定今晚八点归还。"
+    },
+    {
+      "name": "测试员",
+      "is_user": true,
+      "mes": "我的剧情写法要求：偏好安静调查，不要安排追逐。现在八点到了，沈砚实际取出借来的铜钥匙交回林青掌心，林青收进腰包，二人确认归还约定完成。只简短写这次归还。"
+    },
+    {
+      "name": "DeepSeek隔离测试",
+      "is_user": false,
+      "mes": "八点到了，沈砚取出铜钥匙，交回林青掌心。林青收进腰包，二人确认归还完成。"
+    }
+  ],
+  "baselineRecords": [
+    {
+      "floorIndex": 0,
+      "summary": "10月15日傍晚，林青与沈砚在旧书房；林青有一把铜钥匙，放在自己的腰包中。",
+      "memoryVersion": 2,
+      "memoryChanges": [
+        {
+          "table": "scene",
+          "id": "current",
+          "operation": "upsert",
+          "values": {
+            "time": "10月15日傍晚",
+            "location": "旧书房",
+            "situation": "林青与沈砚在旧书房"
+          }
+        },
+        {
+          "table": "characters",
+          "id": "林青",
+          "operation": "upsert",
+          "values": {
+            "name": "林青",
+            "location": "旧书房",
+            "state": "身上带着一把铜钥匙，放在腰包中"
+          }
+        },
+        {
+          "table": "characters",
+          "id": "沈砚",
+          "operation": "upsert",
+          "values": {
+            "name": "沈砚",
+            "location": "旧书房"
+          }
+        },
+        {
+          "table": "inventory",
+          "id": "铜钥匙",
+          "operation": "upsert",
+          "values": {
+            "name": "铜钥匙",
+            "owner": "林青",
+            "holder": "林青",
+            "quantity": "1",
+            "place": "林青的腰包中"
+          }
+        }
+      ]
+    },
+    {
+      "floorIndex": 1,
+      "summary": "林青从腰包取出铜钥匙实际交到沈砚手里，只借给他开门，约定今晚八点归还。",
+      "memoryVersion": 2,
+      "memoryChanges": [
+        {
+          "table": "inventory",
+          "id": "铜钥匙",
+          "operation": "upsert",
+          "values": {
+            "name": "铜钥匙",
+            "owner": "林青",
+            "holder": "沈砚",
+            "quantity": "1",
+            "state": "借给沈砚开门",
+            "place": ""
+          }
+        },
+        {
+          "table": "tasks",
+          "id": "归还铜钥匙",
+          "operation": "upsert",
+          "values": {
+            "name": "归还铜钥匙",
+            "owner": "沈砚",
+            "participants": "林青、沈砚",
+            "deadline": "今晚八点",
+            "state": "进行中",
+            "next": "沈砚今晚八点前归还铜钥匙给林青"
+          }
+        },
+        {
+          "table": "characters",
+          "id": "沈砚",
+          "operation": "upsert",
+          "values": {
+            "name": "沈砚",
+            "state": "从林青处借得铜钥匙，仅用于开门，需今晚八点归还"
+          }
+        }
+      ]
+    },
+    {
+      "floorIndex": 2,
+      "summary": "林青取出铜钥匙交到沈砚手里，约定今晚八点归还。",
+      "memoryVersion": 2,
+      "memoryChanges": []
+    },
+    {
+      "floorIndex": 3,
+      "summary": "玩家要求不要发生新的交接，只回答铜钥匙归谁所有、现在在谁手上、约定几点归还。",
+      "memoryVersion": 2,
+      "memoryChanges": []
+    },
+    {
+      "floorIndex": 4,
+      "summary": "确认铜钥匙归林青所有、现在在沈砚手上、约定今晚八点归还。",
+      "memoryVersion": 2,
+      "memoryChanges": []
+    }
+  ]
+}

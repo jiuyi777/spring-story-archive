@@ -1,4 +1,4 @@
-import { MEMORY_TABLES, MEMORY_FIELD_HINTS } from '../core/memory-database.js?v=0.7.2';
+import { MEMORY_TABLES, MEMORY_FIELD_HINTS } from '../core/memory-database.js?v=0.7.3';
 
 // One short line under each entry title, so a list can be scanned without opening rows.
 const SUBTITLE = {

@@ -1,6 +1,6 @@
 // Small play features that ride inside the main reply instead of costing their
 // own API call: story options at the end of a reply, and a director's nudge.
-import { MODE_LABELS } from './api-client.js?v=0.7.2';
+import { MODE_LABELS } from './api-client.js?v=0.7.3';
 
 export const OPTION_TAG = 'chunxu-options';
 const BLOCK = new RegExp(`<${OPTION_TAG}>([\\s\\S]*?)(?:</${OPTION_TAG}>|$)`, 'i');
@@ -13,9 +13,9 @@ export const MAX_LABEL = 8;
 const PRESET_SLOTS = { 4: [3, 1, 0], 6: [4, 1, 1], 8: [5, 2, 1], 12: [8, 2, 2] };
 const PRESET_LENGTH = { 4: '25–50 字', 6: '25–50 字', 8: '15–30 字', 12: '8–15 字' };
 const ACTION_VOICE = {
-  guided: '用第一人称写玩家角色要做的事或要做的决定',
-  scene: '写玩家角色可以走进的一个具体场景：去哪里、找谁、碰上什么',
-  third: '用第三人称写玩家角色要做的事或要做的决定',
+  guided: '用第一人称写{{user}}要做的事或要做的决定',
+  scene: '写{{user}}可以走进的一个具体场景：去哪里、找谁、碰上什么',
+  third: '用第三人称写{{user}}要做的事或要做的决定',
   mixed: '第一人称的行动、可以走进的场景、第三人称的行动三种写法都要用到',
 };
 
@@ -25,7 +25,7 @@ export function normalizeOptionCount(count) {
 }
 
 // Shared rules for every option; the player can rewrite or clear them.
-export const DEFAULT_OPTION_RULES = '所有选项都要符合当前场景和人物的能力，能推进剧情或关系，不重复，不与已经发生的事矛盾。\n不替玩家决定内心。';
+export const DEFAULT_OPTION_RULES = '所有选项都要符合当前场景和人物的能力，能推进剧情或关系，不重复，不与已经发生的事矛盾。\n不替{{user}}决定内心。';
 
 export function presetSlots(count = 6, mode = 'guided') {
   const size = normalizeOptionCount(count);
@@ -115,7 +115,7 @@ export const ADVANCE_MODULES = [
 ];
 export const DEFAULT_ADVANCE_MODULES = ['time', 'deadlines', 'present', 'consequence', 'pace'];
 export const STRENGTH = {
-  light: '推进要轻：只在回应玩家之后加一两句变化，不打断玩家正在做的事。',
+  light: '推进要轻：只在回应{{user}}之后加一两句变化，不打断{{user}}正在做的事。',
   normal: '推进幅度不超过一个场景。',
   strong: '可以推得明显一些：让一件事真正发生，逼出新的局面，但仍然只到一个场景为止。',
 };
@@ -143,7 +143,7 @@ export function advanceLines(database, {
   if (present.length) add('present', `在场的人可以按自己的目标行动：${present.join('；')}。`);
   const away = (tables.characters ?? []).filter((row) => row.values.goal && here && row.values.location && row.values.location !== here).slice(0, 3)
     .map((row) => `${row.values.name}（在${row.values.location}，想要${row.values.goal}）`);
-  if (away.length) add('offscreen', `不在场的人也在推进自己的事，可以通过消息、痕迹或旁人提起让玩家察觉：${away.join('；')}。`);
+  if (away.length) add('offscreen', `不在场的人也在推进自己的事，可以通过消息、痕迹或旁人提起让{{user}}察觉：${away.join('；')}。`);
   const recentEvents = (tables.events ?? []).slice(-12, -2).map((row) => row.values.summary).filter(Boolean).slice(-3);
   if (recentEvents.length) add('consequence', `之前发生的事可以开始产生影响：${recentEvents.join('；')}。`);
   const relations = (tables.relationships ?? []).slice(-3).map((row) => `${row.values.from}与${row.values.to}：${row.values.relation || row.values.state || '有关联'}`);
@@ -153,9 +153,9 @@ export function advanceLines(database, {
   add('breather', '给一段安静的日常和人物之间的小互动，别急着制造新事件。');
   add('world', '让更大范围的事情波及眼前：一条消息、某个势力的动作、世界规则带来的代价。');
   const short = recentPlayerTexts.slice(-3).filter((text) => String(text).replace(/\s/g, '').length <= 12);
-  if (short.length >= 3) add('stall', '玩家最近几轮回应很短，这次推进要明显一些，让局面出现玩家必须回应的变化。');
+  if (short.length >= 3) add('stall', '{{user}}最近几轮回应很短，这次推进要明显一些，让局面出现{{user}}必须回应的变化。');
   const wishes = (tables.player ?? []).map((row) => [row.values.kind, row.values.content].filter(Boolean).join('：')).filter(Boolean).slice(0, 6);
-  if (wishes.length) add('pace', `推进节奏要符合玩家说过的话：${wishes.join('；')}。`);
+  if (wishes.length) add('pace', `推进节奏要符合{{user}}说过的话：${wishes.join('；')}。`);
   const pool = unusedEvents(eventPool, usedEvents);
   if (pool.length) add('pool', `可以从这些事件里挑一件发生：${pool.slice(0, 20).join('；')}。`);
   return lines;
@@ -184,12 +184,12 @@ export function buildAdvanceInstruction(database, {
   if (all.has('pace')) lines.push(`- ${all.get('pace')}`);
   if (!lines.length && !tastes && !playerProfileSummary && !goal) return '';
   return [
-    '【剧情推进】回应完玩家之后，让世界自己往前走：',
+    '【剧情推进】回应完{{user}}之后，让世界自己往前走：',
     ...lines,
     scene.time || here ? `当前：${[scene.time, here].filter(Boolean).join('，')}。` : '',
     goal ? `主线方向（慢慢靠近，不要一步到位）：${goal}` : '',
-    tastes ? `玩家喜欢的题材和口味：${tastes}` : '',
-    playerProfileSummary ? `玩家想要的体验：${String(playerProfileSummary).slice(0, 300)}` : '',
+    tastes ? `{{user}}喜欢的题材和口味：${tastes}` : '',
+    playerProfileSummary ? `{{user}}想要的体验：${String(playerProfileSummary).slice(0, 300)}` : '',
     STRENGTH[strength] ?? STRENGTH.normal,
     '不跳时、不瞬移、不改变已有关系的事实。',
   ].filter(Boolean).join('\n');
@@ -219,7 +219,7 @@ export function optionRegexScripts() {
     {
       ...base,
       id: OPTION_REGEX_IDS.display,
-      scriptName: '春序 · 剧情选项美化',
+      scriptName: '喵喵 · 剧情选项美化',
       findRegex: `/\\s*<${OPTION_TAG}>\\s*([\\s\\S]*?)\\s*<\\/${OPTION_TAG}>/gi`,
       replaceString: '\n\n<div class="chunxu-options"><div class="chunxu-options-head"><span class="chunxu-options-title">下一步</span><span class="chunxu-options-hint">点选填入输入框</span><span class="chunxu-options-refresh" title="重新生成一组选项">换一组</span></div><div class="chunxu-options-list">$1</div></div>',
       markdownOnly: true,
@@ -228,7 +228,7 @@ export function optionRegexScripts() {
     {
       ...base,
       id: OPTION_REGEX_IDS.display.replace(/101$/, '103'),
-      scriptName: '春序 · 剧情选项美化（单项）',
+      scriptName: '喵喵 · 剧情选项美化（单项）',
       findRegex: '/\\s*<co>\\s*(?:【([^】]{1,8})】)?\\s*([\\s\\S]*?)\\s*<\\/co>\\s*/gi',
       replaceString: '<span class="chunxu-opt" data-kind="$1"><span class="chunxu-opt-kind">$1</span><span class="chunxu-opt-text">$2</span></span>',
       markdownOnly: true,
@@ -237,7 +237,7 @@ export function optionRegexScripts() {
     {
       ...base,
       id: OPTION_REGEX_IDS.prompt,
-      scriptName: '春序 · 剧情选项不发送',
+      scriptName: '喵喵 · 剧情选项不发送',
       findRegex: `/\\s*<${OPTION_TAG}>[\\s\\S]*?(?:<\\/${OPTION_TAG}>|$)/gi`,
       replaceString: '',
       markdownOnly: false,

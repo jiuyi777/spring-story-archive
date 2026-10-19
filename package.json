@@ -1,10 +1,10 @@
 {
   "name": "spring-story-archive",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check index.js && node --check core/send-history.js && node --check ui/send-view.js && node --check ui/chat-options.js && node --check core/memory-database.js && node --check ui/memory-view.js && node --check ui/overview-view.js && node --check ui/cliche-note.js && node --check ui/prompt-view.js && node --check ui/option-slots.js && node --check core/play-prompts.js && node --check core/cliche-filter.js && node --check core/keyword-recall.js && node --check core/api-profiles.js && node --check core/privacy-payload.js && node --check core/api-client.js && node --check core/preference-quiz.js && node --check core/semantic-recall.js && node --check core/storage.js && node --check core/summary-engine.js && node --check core/story-context.js && node --check ui/view.js && node --check ui/push-card.js && node --check ui/hero.js && node --check core/advance-plan.js"
+    "check": "node --check index.js && node --check core/send-history.js && node --check ui/send-view.js && node --check ui/chat-options.js && node --check core/memory-database.js && node --check ui/memory-view.js && node --check ui/overview-view.js && node --check ui/cliche-note.js && node --check ui/prompt-view.js && node --check ui/option-slots.js && node --check core/play-prompts.js && node --check core/cliche-filter.js && node --check core/keyword-recall.js && node --check core/api-profiles.js && node --check core/privacy-payload.js && node --check core/api-client.js && node --check core/preference-quiz.js && node --check core/semantic-recall.js && node --check core/storage.js && node --check core/summary-engine.js && node --check core/story-context.js && node --check ui/view.js && node --check ui/push-card.js && node --check ui/hero.js && node --check core/advance-plan.js && node --check core/story-segments.js && node --check core/chapters.js"
   }
 }

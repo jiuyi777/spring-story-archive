@@ -19,7 +19,7 @@ function transactionDone(transaction) {
 }
 
 export function openArchiveStorage(indexedDb = globalThis.indexedDB) {
-  if (!indexedDb) throw new Error('此浏览器不支持 IndexedDB，春序档案无法保存。');
+  if (!indexedDb) throw new Error('此浏览器不支持 IndexedDB，喵喵数据库无法保存。');
   const request = indexedDb.open(DB_NAME, DB_VERSION);
   request.onupgradeneeded = () => {
     const database = request.result;

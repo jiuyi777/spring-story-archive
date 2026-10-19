@@ -42,6 +42,33 @@ test('failed final-prompt validation is recorded as stopped instead of verified'
   assert.equal(record.status, 'stopped'); assert.equal(record.verified, false);
 });
 
+test('send history keeps original floor numbers when the current model includes or omits old tool history', async () => {
+  const chat = [
+    { is_system: true, mes: 'system note' },
+    { name: '角色', mes: 'first story' },
+    { is_system: true, mes: 'old tool call', extra: { tool_invocations: [] } },
+    { name: '玩家', is_user: true, mes: 'player story' },
+    { is_system: true, mes: 'another old tool call', extra: { tool_invocations: [] } },
+    { name: '角色', mes: 'latest story' },
+  ];
+  for (const includesTools of [false, true]) {
+    const storage = createMemoryStorage();
+    const sourceRows = chat.map((message, floorIndex) => ({ message, floorIndex }))
+      .filter(({ message }) => !message.is_system || (includesTools && Array.isArray(message.extra?.tool_invocations)));
+    const promptChat = sourceRows.map(({ message }, index) => ({ ...message, index }));
+    const ledger = createSendHistory({ storage, chatKey: 'A', chat, promptChat });
+    await ledger.idle();
+    const [prepared] = await storage.listSendRecords('A');
+    assert.deepEqual(prepared.rawFloors.map(row => row.floorIndex), sourceRows.map(row => row.floorIndex));
+    ledger.plan({ prompt: 'summary', includedFloors: [1], removeIndexes: [0] }, true);
+    await ledger.finish();
+    const [finished] = await storage.listSendRecords('A');
+    assert.deepEqual(finished.removedFloors, [1]);
+    assert.deepEqual(finished.rawFloors.map(row => row.floorIndex), sourceRows.slice(1).map(row => row.floorIndex));
+    assert.deepEqual(finished.rawFloors.map(row => row.text), sourceRows.slice(1).map(row => row.message.mes));
+  }
+});
+
 test('context selection follows aliases, current location, owners and relationships, excluding unrelated inventory', () => {
   const row = (id, values, floorIndex = 10) => ({ id, values, floorIndex });
   const database = { tables: {

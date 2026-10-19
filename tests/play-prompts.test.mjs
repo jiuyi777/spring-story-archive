@@ -137,7 +137,7 @@ test('labels are cleaned and the total is capped at twelve', () => {
 test('presets and shared rules are just starting points', () => {
   assert.deepEqual(presetSlots(8).map((slot) => slot.count), [5, 2, 1]);
   const text = buildOptionsInstruction({ slots: presetSlots(6), notes: DEFAULT_OPTION_RULES });
-  assert.match(text, /- 不替玩家决定内心。/);
+  assert.match(text, /- 不替{{user}}决定内心。/);
 });
 
 import { describeTasteSettings, genreLabels, GENRE_GROUPS } from '../core/preference-quiz.js';
@@ -149,7 +149,7 @@ test('genre and taste picks become one line for push and analysis; MBTI is only 
   assert.match(line, /自述 MBTI：INFP（仅作参考）/);
   assert.equal(describeTasteSettings({ mbti: 'XXXX' }), '');
   const text = buildAdvanceInstruction({ tables: {} }, { modules: [], tastes: line });
-  assert.match(text, /玩家喜欢的题材和口味：喜欢的题材/);
+  assert.match(text, /{{user}}喜欢的题材和口味：喜欢的题材/);
 });
 
 test('both 男频 and 女频 list 无限流 separately', () => {
@@ -157,4 +157,15 @@ test('both 男频 and 女频 list 无限流 separately', () => {
   assert.ok(ids.includes('infinite_m') && ids.includes('infinite_f'));
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(genreLabels(['xuanhuan']), ['玄幻']);
+});
+
+test('option and push sentences name the player with {{user}}, never 玩家', async () => {
+  const { buildOptionsInstruction, buildAdvanceInstruction, presetSlots } = await import('../core/play-prompts.js');
+  const options = buildOptionsInstruction({ slots: presetSlots(6) });
+  const db = { tables: { scene: [{ values: { location: '旧宅' } }], characters: [{ values: { name: '沈砚', goal: '找账本', location: '西廊' } }], player: [{ values: { kind: '喜欢', content: '慢热' } }] } };
+  const push = buildAdvanceInstruction(db, { modules: ['offscreen', 'stall', 'pace'], strength: 'light', recentPlayerTexts: ['嗯', '好', '然后'], tastes: '悬疑', playerProfileSummary: '慢热' });
+  for (const text of [options, push]) {
+    assert.doesNotMatch(text, /玩家/);
+    assert.match(text, /\{\{user\}\}/);
+  }
 });

@@ -151,6 +151,65 @@ test('real interceptor injects normal summary when semantic recall is off', asyn
   vm.createContext(sandbox);
   vm.runInContext(functions, sandbox);
   await sandbox.semanticRecallInterceptor(data.promptChat, 32000, () => assert.fail('unexpected abort'), 'normal');
-  assert.match(prompts.get(STORY_PROMPT_ID), /剧情总摘要/);
+  assert.match(prompts.get(STORY_PROMPT_ID), /剧情记忆/);
   assert.equal(data.promptChat.length, 5);
+});
+
+test('recall skips preserved raw floors with summary disabled and maps system/tool rows correctly', async () => {
+  const source = await readFile(new URL('../index.js', import.meta.url), 'utf8');
+  const prepare = source.slice(source.indexOf('async function prepareArchivePrompt('), source.indexOf('\nfunction scheduleReconcile('));
+  const scenarios = [
+    {
+      chat: Array.from({ length: 9 }, (_, index) => ({ name: '角色', is_user: false, mes: `原文${index}` })),
+      recalled: [0, 1], omitPromptIndexes: [], expected: [], duplicates: 2,
+    },
+    {
+      chat: [
+        { is_system: true, mes: '系统说明' },
+        { name: '角色', is_user: false, mes: '保留的旧原文' },
+        { name: '玩家', is_user: true, mes: '未进入本轮原文的历史' },
+        { is_system: true, mes: '工具消息', extra: { tool_invocations: [] } },
+        { name: '角色', is_user: false, mes: '工具后的原文' },
+      ],
+      recalled: [1, 2, 3, 4], omitPromptIndexes: [1], expected: [2], duplicates: 3,
+    },
+    {
+      chat: [
+        { is_system: true, mes: '系统说明' },
+        { name: '角色', is_user: false, mes: '工具前的原文' },
+        { is_system: true, mes: '本轮不使用的历史工具消息', extra: { tool_invocations: [] } },
+        { name: '玩家', is_user: true, mes: '未进入本轮原文的历史' },
+        { name: '角色', is_user: false, mes: '工具后的原文' },
+      ],
+      includeTools: false, recalled: [1, 3, 4], omitPromptIndexes: [1], expected: [3], duplicates: 2,
+    },
+  ];
+  for (const scenario of scenarios) {
+    const promptChat = scenario.chat.filter((row) => !row.is_system || (scenario.includeTools !== false && Array.isArray(row.extra?.tool_invocations)))
+      .map((row, index) => ({ ...row, index })).filter((row) => !scenario.omitPromptIndexes.includes(row.index));
+    const before = structuredClone(promptChat);
+    const context = { chat: scenario.chat, setExtensionPrompt() {} };
+    const captured = {};
+    const sandbox = {
+      getContext: () => context, currentChatKey: () => 'A',
+      getSettings: () => ({ summaryContextEnabled: false, filterArchivedFloors: false, memoryTokenLimit: 1000, recallDepth: 4 }),
+      memoryBudgetFor, injectStoryContext, fitRecall, estimateTokens,
+      engine: { chatKey: 'A', storage: createMemoryStorage() },
+      showStoryContextStatus() {}, finishStoryRequest() {}, clearRecallPrompt() {}, clearStoryPrompt() {},
+      recallOn: () => true, showRecallState() {}, recallState: {}, RECALL_PROMPT_ID: 'recall',
+      recallForCurrentContext: async () => ({ records: scenario.recalled.map((floorIndex) => ({
+        floorIndex, sourceText: `历史${floorIndex}`, similarity: 0.9,
+      })) }),
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(prepare, sandbox);
+    await sandbox.prepareArchivePrompt(promptChat, 32000, () => assert.fail('unexpected abort'), 'normal', {
+      recordRecall: (prompt, records) => Object.assign(captured, { prompt, floors: records.map((row) => row.floorIndex) }),
+      recordBudget: (budget) => { captured.budget = budget; },
+    });
+    assert.deepEqual(captured.floors, scenario.expected);
+    assert.equal(captured.budget.dropped.duplicate, scenario.duplicates);
+    assert.ok(captured.budget.story + captured.budget.recall <= captured.budget.limit);
+    assert.deepEqual(promptChat, before);
+  }
 });

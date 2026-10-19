@@ -1,5 +1,5 @@
 // Editor for the story-option categories: label, how many, and what each one asks for.
-import { MAX_OPTIONS, MAX_LABEL } from '../core/play-prompts.js?v=0.7.2';
+import { MAX_OPTIONS, MAX_LABEL } from '../core/play-prompts.js?v=0.7.3';
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
